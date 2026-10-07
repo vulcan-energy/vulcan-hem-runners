@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Private source relocation record for the FHS-only target runner boundary",
+  "relocationHashesDescribe": "sha256AfterRelocation values record the original post-move bytes before the separately recorded 2026-10-06 owner-approved SPDX and Origin Terms headers were added.",
+  "sourceRepository": "rust-hem-runner",
+  "sourceRootHeadAtRelocation": "e7619ff53da31d228dacbf313eef632b099d0b8a",
+  "sourceRootWorktreeWasDirty": true,
+  "preMoveWholeFileHashesCaptured": true,
+  "preMoveReceipt": {
+    "archive": "tmp/hem-release-final-20261006/final-checkpoint/root-changed-files.tar.gz",
+    "archiveSha256": "f16781ed2e8b81e4699390830488d08f8bd97a4fff737079d2d85b55004acf66",
+    "revision": "e7619ff53da31d228dacbf313eef632b099d0b8a",
+    "note": "Dirty runner source files were read from this retained checkpoint archive. project_flags.rs and hem_runtime.rs were unchanged at the checkpoint and are hashed from that revision."
+  },
+  "preMoveHashMethod": "Whole-file SHA-256 of the exact archived source files, or `git show` bytes for files recorded as unchanged at the root revision.",
+  "relocations": [
+    {
+      "destination": "hem-target-core/src/target_scenario.rs",
+      "sha256AfterRelocation": "bc41e085b3d10b03ff59157f4091b9325bba79b6ff70f394e0c730a541e8395a",
+      "sourceSymbols": [
+        "hem-batch-core/src/csv_pipeline/mod.rs::prepare_target_scenario",
+        "hem-batch-core/src/csv_pipeline/mod.rs::prepare_effective_scenario",
+        "hem-batch-core/src/csv_pipeline/mod.rs::reject_structural_change",
+        "hem-batch-core/src/batch_runner.rs::pitch_is_wall_band",
+        "hem-batch-core/src/batch_runner.rs::update_zone_fabric",
+        "hem-batch-core/src/batch_runner.rs::update_object",
+        "hem-batch-core/src/batch_runner.rs::build_space_heat_system_from_template",
+        "hem-batch-core/src/batch_runner.rs::merge_model",
+        "hem-batch-core/src/batch_runner.rs::detect_and_apply_compliance_settings",
+        "hem-batch-core/src/batch_runner.rs::auto_assign_cooling_systems",
+        "hem-batch-core/src/batch_runner.rs::expand_event_patterns"
+      ],
+      "preMoveSourceFiles": [
+        {
+          "path": "hem-batch-core/src/csv_pipeline/mod.rs",
+          "sha256": "fd37cccf2eddc78fe38a932ec0676114c34e56948edcd9231bd68a6dff30ac4c"
+        },
+        {
+          "path": "hem-batch-core/src/batch_runner.rs",
+          "sha256": "9ecc3f5df8a962f110308eb8b7e2606ccdac8bbfd4cd073c32dc7ea4a9e3602e"
+        }
+      ],
+      "canonicalConverter": "community/crates/vulcan-model-transform::transform_geometry_csv",
+      "removedBehaviorEquivalentNoOpArms": [
+        "merge_model category sap_xml",
+        "merge_model category additional_outputs"
+      ]
+    },
+    {
+      "destination": "hem-target-core/src/in_memory_output.rs",
+      "sha256AfterRelocation": "6c6fae09a88a34345b0a48030a639c1ad3c13693d17589d09d202116bcd15476",
+      "sourceSymbols": [
+        "hem-batch-core/src/in_memory_output.rs::InMemoryOutputWriter",
+        "hem-batch-core/src/in_memory_output.rs::InMemoryFileWriter"
+      ],
+      "preMoveSourceFiles": [
+        {
+          "path": "hem-batch-core/src/in_memory_output.rs",
+          "sha256": "56341cf99c0ff68c62501bacd72415014fea4de4c4b1162578456c242b7743d4"
+        }
+      ]
+    },
+    {
+      "destination": "hem-target-core/src/runtime.rs",
+      "sha256AfterRelocation": "94ed75808a0bbd03c0c209cf7fc8a628e0fd207575285026a57f57e5acb85675",
+      "sourceSymbols": [
+        "wasm_wrapper/src/lib.rs::prepared_rust_target_flags",
+        "wasm_wrapper/src/lib.rs::run_target_input_inner",
+        "hem-batch-core/src/hem_runtime.rs::external_conditions_from_epw_str",
+        "hem-batch-core/src/hem_runtime.rs::format_hem_error_report"
+      ],
+      "preMoveSourceFiles": [
+        {
+          "path": "wasm_wrapper/src/lib.rs",
+          "sha256": "13ab29b019b058e206e86273f182f9fa9f2d9df1d089ce96406bedcf4be3693c"
+        },
+        {
+          "path": "hem-batch-core/src/hem_runtime.rs",
+          "sha256": "d8e59db8824fd331fe613626970b596512ef7e15d776f8cfe06acdae13ef4ed8"
+        }
+      ]
+    },
+    {
+      "destination": "hem-target-core/src/project_flags.rs",
+      "sha256AfterRelocation": "f30c7351933090151e52979660a9ea2e4b3bf29a566a74059f4a25e5bcc396ec",
+      "sourceSymbols": [
+        "hem-batch-core/src/project_flags.rs::ProjectFlags"
+      ],
+      "preMoveSourceFiles": [
+        {
+          "path": "hem-batch-core/src/project_flags.rs",
+          "sha256": "f30c7351933090151e52979660a9ea2e4b3bf29a566a74059f4a25e5bcc396ec"
+        }
+      ]
+    }
+  ],
+  "communityCheckout": {
+    "headObserved": "844e3363dcd39461c7dbe0d8854b9b95a5ad6a2d",
+    "worktreeWasDirty": true,
+    "note": "The local canonical transform dependency had uncommitted Community source changes; the observed submodule HEAD alone is not a complete transform source snapshot."
+  },
+  "licensingDecision": {
+    "approvedBy": "Home Energy Foundry Limited owner",
+    "approvedOn": "2026-10-06",
+    "license": "AGPL-3.0-only",
+    "additionalTerms": "Vulcan Origin Terms v1.0",
+    "coveredScope": [
+      "hem-target-core/**",
+      "hem_target_wrapper/**",
+      "scripts/hem-targets/export-runner-sources.mjs",
+      "scripts/hem-targets/verify-runner-source-manifest.mjs",
+      "scripts/hem-targets/__tests__/export-runner-sources.test.mjs",
+      "scripts/hem-targets/patch-wasm-rayon-worker-helper.mjs",
+      "scripts/build-fhs-target-wasm.sh"
+    ],
+    "notChanged": ["root LICENSE", "hem_engine_upstream/**", "hem_fhs_upstream/**", "community/**"]
+  },
+  "postApprovalNoticeHashes": {
+    "hem-target-core/src/in_memory_output.rs": "b4c8637ba5cb545107b34e6f05535313f6c1215e98c6f1cf6fb092286938767f",
+    "hem-target-core/src/lib.rs": "fd99d20143cd86f343eb4fe1b2a2ffd5685ea791b13192398d0827c2216a2775",
+    "hem-target-core/src/project_flags.rs": "ca8ff1c76c694407d10e4a902ea1097647c05bb04394aad8a30618e58832a298",
+    "hem-target-core/src/runtime.rs": "b55a09d86de238a276f433fa4e05df3984d38ba72ad508530e5304245bdc287d",
+    "hem-target-core/src/target_scenario.rs": "8910f918653615b2a6d863fc8c32163c3e8019d1a8282991834f976430b7339b",
+    "hem_target_wrapper/src/lib.rs": "e3b8533449b692ac7b4285e818dc6571c7158dad8a5bf80e6f441cec42a17ef5",
+    "hem_target_wrapper/build.rs": "09dbf7ce4fcf46d1d7126d5d24466211ee0fda594035cf753eeffc19946a8340",
+    "hem_target_wrapper/browser_env_shim.js": "3ec6cb35d518a50e27fc107812b7693eb7583ab5afc45b13015ab3a94d65f213"
+  },
+  "licenseAuthorities": {
+    "extractedFirstPartyCode": "Owner-approved AGPL-3.0-only supplemented by Vulcan Origin Terms v1.0 on 2026-10-06; see scripts/hem-targets/licensing/NOTICE.md.",
+    "communityTransform": "community/PATH_RIGHTS.md and the crate's AGPL-3.0-only plus Vulcan Origin Terms notices",
+    "hemUpstream": "MIT at 62d3df705690f33b3fc3e905c9971d4f3743bf2e",
+    "fhsUpstream": "MIT at c5ba2673fbd886cfe4fb528f61b376bdf406ebbd, canonical evidence revision dd5ba73a19674d631da59b4924bb7dc2833fbb3b"
+  }
+}

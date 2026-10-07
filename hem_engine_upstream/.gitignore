@@ -1,0 +1,18 @@
+**/target
+
+#jetbraaaaains IDEs
+.idea
+
+#results files in examples (not tests directory)
+examples/**/*_results*.csv
+examples/**/*_postproc*.csv
+examples/**/*_preproc.json
+
+#weather file in case compilation using this resource is needed
+src/weather.epw
+
+# MacOS generated file
+**/.DS_Store
+
+# IDE generated files
+.vscode

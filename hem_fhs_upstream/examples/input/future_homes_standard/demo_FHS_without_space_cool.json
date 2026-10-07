@@ -1,0 +1,585 @@
+{
+    "Appliances": {
+        "Clothes_drying": "Not Installed",
+        "Clothes_washing": "Default",
+        "Dishwasher": "Not Installed",
+        "Freezer": "Not Installed",
+        "Fridge": "Default",
+        "Hobs": "Default",
+        "Oven": "Default"
+    },
+    "BuildingLength": 10,
+    "BuildingWidth": 5,
+    "ColdWaterSource": {
+        "header tank": {
+            "start_day": 0,
+            "temperatures": [
+                3.0,
+                3.1,
+                3.2,
+                3.3,
+                3.4,
+                3.5,
+                3.6,
+                3.7
+            ],
+            "time_series_step": 1
+        }
+    },
+    "EnergySupply": {
+        "mains elec": {
+            "ElectricBattery": {
+                "battery_location": "inside",
+                "capacity": 2,
+                "charge_discharge_efficiency_round_trip": 0.8,
+                "maximum_charge_rate_one_way_trip": 1.5,
+                "maximum_discharge_rate_one_way_trip": 1.25,
+                "minimum_charge_rate_one_way_trip": 0.001
+            },
+            "diverter": {
+                "HeatSource": "immersion"
+            },
+            "fuel": "electricity"
+        },
+        "mains gas": {
+            "fuel": "mains_gas"
+        }
+    },
+    "Events": {
+        "Bath": {
+            "medium": [
+                {
+                    "start": 6,
+                    "temperature": 41.0
+                }
+            ]
+        },
+        "Other": {
+            "other": [
+                {
+                    "duration": 1,
+                    "start": 7,
+                    "temperature": 41.0
+                }
+            ]
+        },
+        "Shower": {
+            "IES": [
+                {
+                    "duration": 6,
+                    "start": 4.1,
+                    "temperature": 41.0
+                },
+                {
+                    "duration": 6,
+                    "start": 6,
+                    "temperature": 41.0
+                }
+            ],
+            "mixer": [
+                {
+                    "duration": 6,
+                    "start": 7,
+                    "temperature": 41.0
+                }
+            ]
+        }
+    },
+    "ExternalConditions": {
+        "shading_segments": [
+            {
+                "end360": 45,
+                "start360": 0
+            },
+            {
+                "end360": 90,
+                "start360": 45
+            },
+            {
+                "end360": 135,
+                "start360": 90
+            },
+            {
+                "end360": 180,
+                "shading": [
+                    {
+                        "distance": 12,
+                        "height": 10.5,
+                        "type": "obstacle"
+                    }
+                ],
+                "start360": 135
+            },
+            {
+                "end360": 225,
+                "start360": 180
+            },
+            {
+                "end360": 270,
+                "start360": 225
+            },
+            {
+                "end360": 315,
+                "start360": 270
+            },
+            {
+                "end360": 360,
+                "start360": 315
+            }
+        ]
+    },
+    "General": {
+        "build_type": "house",
+        "storeys_in_dwelling": 1
+    },
+    "GroundFloorArea": 50,
+    "HeatingControlType": "SeparateTempControl",
+    "KitchenExtractorHoodExternal": true,
+    "HotWaterDemand": {
+        "Bath": {
+            "medium": {
+                "ColdWaterSource": "header tank",
+                "size": 180
+            }
+        },
+        "Other": {
+            "Other1": {
+                "ColdWaterSource": "header tank",
+                "flowrate": 12.0
+            }
+        },
+        "Shower": {
+            "mixer": {
+                "ColdWaterSource": "header tank",
+                "WWHRS": "Waste Water Heat Recovery System",
+                "flowrate": 8.0,
+                "type": "MixerShower",
+                "allow_low_flowrate": false
+            }
+        }
+    },
+    "HotWaterSource": {
+        "hw cylinder": {
+            "ColdWaterSource": "header tank",
+            "HeatSource": {
+                "immersion": {
+                    "EnergySupply": "mains elec",
+                    "heater_position": 0.1,
+                    "power": 3.0,
+                    "thermostat_position": 0.33,
+                    "type": "ImmersionHeater"
+                }
+            },
+            "daily_losses": 1.68,
+            "type": "StorageTank",
+            "volume": 80.0
+        }
+    },
+    "InfiltrationVentilation": {
+        "Leaks": {
+            "env_area": 220,
+            "test_pressure": "Standard",
+            "test_result": 1.2,
+            "ventilation_zone_height": 6
+        },
+        "MechanicalVentilation": {
+            "mechvent1": {
+                "EnergySupply": "mains elec",
+                "design_outdoor_air_flow_rate": 80,
+                "measured_air_flow_rate": 37,
+                "measured_fan_power": 12.26,
+                "mid_height_air_flow_path": 1.5,
+                "orientation360": 90,
+                "pitch": 60,
+                "vent_type": "Centralised continuous MEV"
+            },
+            "mechvent2": {
+                "EnergySupply": "mains elec",
+                "design_outdoor_air_flow_rate": 80,
+                "measured_air_flow_rate": 37,
+                "measured_fan_power": 12.26,
+                "mid_height_air_flow_path": 1.5,
+                "orientation360": 90,
+                "pitch": 60,
+                "vent_type": "Centralised continuous MEV"
+            }
+        },
+        "Vents": {
+            "vent1": {
+                "area_cm2": 100,
+                "mid_height_air_flow_path": 1.5,
+                "orientation360": 180,
+                "pitch": 60
+            },
+            "vent2": {
+                "area_cm2": 100,
+                "mid_height_air_flow_path": 1.5,
+                "orientation360": 0,
+                "pitch": 60
+            },
+            "vent3": {
+                "mid_height_air_flow_path": 1.5,
+                "area_cm2": 100,
+                "orientation360": 0,
+                "pitch": 60
+            },
+            "vent4": {
+                "mid_height_air_flow_path": 1.5,
+                "area_cm2": 100,
+                "orientation360": 0,
+                "pitch": 60
+            }
+        },
+        "altitude": 30,
+        "noise_nuisance": true,
+        "shield_class": "Normal",
+        "terrain_class": "OpenField",
+        "ventilation_zone_base_height": 0
+    },
+    "NumberOfBathrooms": 2,
+    "NumberOfBedrooms": 2,
+    "NumberOfHabitableRooms": 3,
+    "NumberOfSanitaryAccommodations": 0,
+    "NumberOfHotTappedRooms": 3,
+    "NumberOfUtilityRooms": 0,
+    "NumberOfWetRooms": 2,
+    "OnSiteGeneration": {
+        "PV 1": {
+            "EnergySupply": "mains elec",
+            "base_height": 10,
+            "height": 1,
+            "inverter_is_inside": false,
+            "inverter_peak_power_ac": 2.4,
+            "inverter_peak_power_dc": 3.5,
+            "inverter_type": "optimised_inverter",
+            "orientation360": 180,
+            "peak_power": 3.5,
+            "pitch": 30,
+            "shading": [],
+            "type": "PhotovoltaicSystem",
+            "ventilation_strategy": "moderately_ventilated",
+            "width": 1
+        }
+    },
+    "PartGcompliance": true,
+    "PartO_active_cooling_required": false,
+    "SpaceHeatSystem": {
+        "main": {
+            "EnergySupply": "mains elec",
+            "convective_type": "Wall heating, radiant ceiling panels, accumulation stoves",
+            "rated_power": 12.0,
+            "type": "InstantElecHeater"
+        }
+    },
+    "WWHRS": {
+        "Waste Water Heat Recovery System": {
+            "ColdWaterSource": "header tank",
+            "flow_rates": [
+                5,
+                7,
+                9,
+                11,
+                13
+            ],
+            "system_a_efficiencies": [
+                63,
+                54.9,
+                48.6,
+                43.6,
+                39.6
+            ],
+            "system_a_utilisation_factor": 0.972,
+            "type": "WWHRS_Instantaneous"
+        }
+    },
+    "Zone": {
+        "ThermalZone": {
+            "BuildingElement": {
+                "ground": {
+                    "area": 15.0,
+                    "areal_heat_capacity": "Very light",
+                    "floor_type": "Slab_no_edge_insulation",
+                    "mass_distribution_class": "D: Mass equally distributed",
+                    "perimeter": 16.0,
+                    "psi_wall_floor_junc": 0.5,
+                    "thermal_resistance_floor_construction": 0.2,
+                    "thickness_walls": 0.2,
+                    "total_area": 15.0,
+                    "type": "BuildingElementGround",
+                    "u_value": 1.4
+                },
+                "roof 0": {
+                    "area": 20.0,
+                    "areal_heat_capacity": "Very light",
+                    "base_height": 2.5,
+                    "colour": "Intermediate",
+                    "height": 2.5,
+                    "is_unheated_pitched_roof": true,
+                    "mass_distribution_class": "IE: Mass divided over internal and external side",
+                    "orientation360": 90,
+                    "pitch": 45,
+                    "thermal_resistance_construction": 0.7,
+                    "type": "BuildingElementOpaque",
+                    "width": 10
+                },
+                "wall 0": {
+                    "area": 20.0,
+                    "areal_heat_capacity": "Very light",
+                    "base_height": 0,
+                    "colour": "Intermediate",
+                    "height": 2.5,
+                    "is_external_door": false,
+                    "mass_distribution_class": "IE: Mass divided over internal and external side",
+                    "orientation360": 90,
+                    "pitch": 90,
+                    "thermal_resistance_construction": 0.7,
+                    "type": "BuildingElementOpaque",
+                    "width": 10
+                },
+                "wall 1": {
+                    "area": 25.0,
+                    "areal_heat_capacity": "Very light",
+                    "base_height": 0,
+                    "colour": "Intermediate",
+                    "height": 2.5,
+                    "is_external_door": true,
+                    "mass_distribution_class": "M: Mass concentrated inside",
+                    "orientation360": 270,
+                    "pitch": 90,
+                    "thermal_resistance_construction": 0.71,
+                    "type": "BuildingElementOpaque",
+                    "width": 10
+                },
+                "wall 2": {
+                    "area": 20.0,
+                    "areal_heat_capacity": "Very light",
+                    "base_height": 0,
+                    "colour": "Intermediate",
+                    "height": 2.5,
+                    "is_external_door": false,
+                    "mass_distribution_class": "E: Mass concentrated at external side",
+                    "orientation360": 0,
+                    "pitch": 90,
+                    "thermal_resistance_construction": 0.72,
+                    "type": "BuildingElementOpaque",
+                    "width": 8
+                },
+                "wall 3": {
+                    "area": 15.0,
+                    "areal_heat_capacity": "Very light",
+                    "base_height": 0,
+                    "colour": "Intermediate",
+                    "height": 2.5,
+                    "is_external_door": false,
+                    "mass_distribution_class": "I: Mass concentrated at internal side",
+                    "orientation360": 180,
+                    "pitch": 90,
+                    "thermal_resistance_construction": 0.73,
+                    "type": "BuildingElementOpaque",
+                    "width": 6
+                },
+                "wall 4": {
+                    "area": 20.0,
+                    "areal_heat_capacity": "Very light",
+                    "mass_distribution_class": "I: Mass concentrated at internal side",
+                    "pitch": 0.0,
+                    "thermal_resistance_construction": 0.74,
+                    "type": "BuildingElementAdjacentConditionedSpace"
+                },
+                "wall 5": {
+                    "area": 20.0,
+                    "areal_heat_capacity": "Very light",
+                    "base_height": 0,
+                    "colour": "Intermediate",
+                    "height": 2.5,
+                    "is_external_door": false,
+                    "mass_distribution_class": "IE: Mass divided over internal and external side",
+                    "orientation360": 90,
+                    "pitch": 90,
+                    "thermal_resistance_construction": 0.7,
+                    "type": "BuildingElementOpaque",
+                    "width": 10
+                },
+                "window 0": {
+                    "base_height": 1,
+                    "frame_area_fraction": 0.25,
+                    "free_area_height": 1.6,
+                    "g_value": 0.75,
+                    "height": 1.25,
+                    "max_window_open_area": 3,
+                    "mid_height": 1.5,
+                    "orientation360": 90,
+                    "pitch": 90,
+                    "security_risk": true,
+                    "shading": [
+                        {
+                            "depth": 0.5,
+                            "distance": 0.5,
+                            "type": "overhang"
+                        },
+                        {
+                            "depth": 0.25,
+                            "distance": 0.1,
+                            "type": "sidefinleft"
+                        },
+                        {
+                            "depth": 0.25,
+                            "distance": 0.1,
+                            "type": "sidefinright"
+                        }
+                    ],
+                    "thermal_resistance_construction": 0.4,
+                    "type": "BuildingElementTransparent",
+                    "width": 4,
+                    "window_part_list": [
+                        {
+                            "mid_height_air_flow_path": 1.5
+                        }
+                    ]
+                },
+                "window 1": {
+                    "base_height": 1,
+                    "frame_area_fraction": 0.25,
+                    "free_area_height": 1.6,
+                    "g_value": 0.75,
+                    "height": 1.25,
+                    "max_window_open_area": 3,
+                    "mid_height": 1.5,
+                    "orientation360": 270,
+                    "pitch": 90,
+                    "security_risk": true,
+                    "shading": [
+                        {
+                            "depth": 0.5,
+                            "distance": 0.5,
+                            "type": "overhang"
+                        },
+                        {
+                            "depth": 0.25,
+                            "distance": 0.1,
+                            "type": "sidefinleft"
+                        },
+                        {
+                            "depth": 0.25,
+                            "distance": 0.1,
+                            "type": "sidefinright"
+                        }
+                    ],
+                    "thermal_resistance_construction": 0.4,
+                    "type": "BuildingElementTransparent",
+                    "width": 4,
+                    "window_part_list": [
+                        {
+                            "mid_height_air_flow_path": 1.5
+                        }
+                    ]
+                },
+                "window 2": {
+                    "base_height": 1,
+                    "frame_area_fraction": 0.25,
+                    "free_area_height": 1.6,
+                    "g_value": 0.75,
+                    "height": 1.25,
+                    "max_window_open_area": 3,
+                    "mid_height": 1.5,
+                    "orientation360": 90,
+                    "pitch": 90,
+                    "security_risk": false,
+                    "shading": [
+                        {
+                            "depth": 0.5,
+                            "distance": 0.5,
+                            "type": "overhang"
+                        },
+                        {
+                            "depth": 0.25,
+                            "distance": 0.1,
+                            "type": "sidefinleft"
+                        },
+                        {
+                            "depth": 0.25,
+                            "distance": 0.1,
+                            "type": "sidefinright"
+                        }
+                    ],
+                    "thermal_resistance_construction": 0.4,
+                    "type": "BuildingElementTransparent",
+                    "width": 4,
+                    "window_part_list": [
+                        {
+                            "mid_height_air_flow_path": 1.5
+                        }
+                    ]
+                },
+                "window 3": {
+                    "base_height": 1,
+                    "frame_area_fraction": 0.25,
+                    "free_area_height": 1.6,
+                    "g_value": 0.75,
+                    "height": 1.25,
+                    "max_window_open_area": 3,
+                    "mid_height": 1.5,
+                    "orientation360": 270,
+                    "pitch": 90,
+                    "security_risk": false,
+                    "shading": [
+                        {
+                            "depth": 0.5,
+                            "distance": 0.5,
+                            "type": "overhang"
+                        },
+                        {
+                            "depth": 0.25,
+                            "distance": 0.1,
+                            "type": "sidefinleft"
+                        },
+                        {
+                            "depth": 0.25,
+                            "distance": 0.1,
+                            "type": "sidefinright"
+                        }
+                    ],
+                    "thermal_resistance_construction": 0.4,
+                    "type": "BuildingElementTransparent",
+                    "width": 4,
+                    "window_part_list": [
+                        {
+                            "mid_height_air_flow_path": 1.5
+                        }
+                    ]
+                }
+            },
+            "Lighting": {
+                "bulbs": [
+                    {
+                        "count": 20,
+                        "efficacy": 150,
+                        "power": 3
+                    }
+                ]
+            },
+            "SpaceHeatSystem": "main",
+            "ThermalBridging": {
+                "TB1": {
+                    "junction_type": "R5",
+                    "length": 3.0,
+                    "linear_thermal_transmittance": 1.0,
+                    "type": "ThermalBridgeLinear"
+                },
+                "TB2": {
+                    "junction_type": "R5",
+                    "length": 2.0,
+                    "linear_thermal_transmittance": 0.1,
+                    "type": "ThermalBridgeLinear"
+                },
+                "TB3": {
+                    "heat_transfer_coeff": 2.0,
+                    "type": "ThermalBridgePoint"
+                }
+            },
+            "livingroom_area": 8.0,
+            "restofdwelling_area": 80.0,
+            "volume": 500.0
+        }
+    }
+}

@@ -1,0 +1,25 @@
+[package]
+name = "hem-target-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0-only"
+description = "Shared FHS scenario preparation and pinned execution"
+
+[dependencies]
+anyhow = "1.0"
+bitflags = "2.4"
+serde_json = "1.0"
+tracing = "0.1"
+hem_upstream = { package = "home-energy-model", path = "../hem_engine_upstream" }
+hem_fhs_upstream = { package = "home-energy-model-wrapper-fhs", path = "../hem_fhs_upstream" }
+vulcan-model-transform = { path = "../community/crates/vulcan-model-transform", default-features = false }
+
+[patch."https://github.com/communitiesuk/epb-home-energy-model.git"]
+home-energy-model = { path = "../hem_engine_upstream" }
+
+[patch.crates-io]
+jsonschema_046 = { package = "jsonschema", path = "../vendor/jsonschema-0.46.5-offline" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = ["console"] }

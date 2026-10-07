@@ -1,0 +1,131 @@
+use crate::core::units::{JOULES_PER_KILOWATT_HOUR, LITRES_PER_CUBIC_METRE};
+use std::sync::LazyLock;
+
+/// This module contains data on the properties of materials, and classes to
+/// organise this data.
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MaterialProperties {
+    density: f64,                  // kg/litre
+    specific_heat_capacity: f64,   // J/(kg.K)
+    volumetric_heat_capacity: f64, // J/(litre.K)
+}
+
+impl MaterialProperties {
+    pub fn new(density: f64, specific_heat_capacity: f64) -> Self {
+        Self {
+            density,
+            specific_heat_capacity,
+            volumetric_heat_capacity: specific_heat_capacity * density,
+        }
+    }
+
+    pub fn density(&self) -> f64 {
+        self.density
+    }
+
+    pub fn density_kg_per_m3(&self) -> f64 {
+        self.density * LITRES_PER_CUBIC_METRE as f64
+    }
+
+    pub fn specific_heat_capacity(&self) -> f64 {
+        self.specific_heat_capacity
+    }
+
+    pub fn specific_heat_capacity_kwh(&self) -> f64 {
+        self.specific_heat_capacity / JOULES_PER_KILOWATT_HOUR as f64
+    }
+
+    pub fn volumetric_heat_capacity(&self) -> f64 {
+        self.volumetric_heat_capacity
+    }
+
+    /// Return energy content of material, in J / litre
+    ///
+    /// Arguments:
+    /// * `temp_high` - temperature for which energy content should be calculated, in deg C or K
+    /// * `temp_base` - temperature which defines "zero energy", in same units as temp_high
+    pub fn volumetric_energy_content_joules_per_litre(
+        &self,
+        temp_high: f64,
+        temp_base: f64,
+    ) -> f64 {
+        (temp_high - temp_base) * self.volumetric_heat_capacity
+    }
+
+    /// Return energy content of material, in kWh / litre
+    ///
+    /// Arguments:
+    /// * `temp_high` - temperature for which energy content should be calculated, in deg C or K
+    /// * `temp_base` - temperature which defines "zero energy", in same units as temp_high
+    pub fn volumetric_energy_content_kwh_per_litre(&self, temp_high: f64, temp_base: f64) -> f64 {
+        self.volumetric_energy_content_joules_per_litre(temp_high, temp_base)
+            / JOULES_PER_KILOWATT_HOUR as f64
+    }
+}
+
+pub(crate) static WATER: LazyLock<MaterialProperties> =
+    LazyLock::new(|| MaterialProperties::new(1.0, 4184.));
+
+// Density of a fluid mixture between 25% glycol (volume) and 75% water (volume) at 20C and
+// specific heat capacity in J / (kg * K). The following report suggests (on pages 14-15)
+// that this mix would be likely to give antifreeze protection to -10 Celsius for either
+// ethylene glycol or propylene glycol:
+// https://assets.publishing.service.gov.uk/media/5a8204a3e5274a2e8ab57110/DECC_RHPP_160404_Note_on_bias_errors_v9.pdf
+pub(crate) static GLYCOL25: LazyLock<MaterialProperties> =
+    LazyLock::new(|| MaterialProperties::new(1.0, 3757.));
+
+pub(crate) static AIR: LazyLock<MaterialProperties> =
+    LazyLock::new(|| MaterialProperties::new(0.001204, 1006.));
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_relative_eq;
+    use pretty_assertions::assert_eq;
+    use rstest::*;
+
+    #[fixture]
+    pub fn matprop() -> MaterialProperties {
+        MaterialProperties::new(1.5, 4184.0)
+    }
+
+    #[rstest]
+    pub fn should_have_correct_density(matprop: MaterialProperties) {
+        assert_eq!(matprop.density(), 1.5, "incorrect density returned");
+    }
+
+    #[rstest]
+    pub fn should_have_correct_specific_heat_capacity(matprop: MaterialProperties) {
+        assert_eq!(
+            matprop.specific_heat_capacity(),
+            4184.0,
+            "incorrect specific heat capacity returned"
+        );
+    }
+
+    #[rstest]
+    pub fn should_have_correct_volumetric_energy_content(matprop: MaterialProperties) {
+        assert_eq!(
+            matprop.volumetric_heat_capacity(),
+            6276.0,
+            "incorrect volumetric heat capacity"
+        );
+    }
+
+    #[rstest]
+    pub fn should_provide_correct_volumetric_energy_content(matprop: MaterialProperties) {
+        let temp_high = 30.0;
+        let temp_low = 20.0;
+        assert_eq!(
+            matprop.volumetric_energy_content_joules_per_litre(temp_high, temp_low),
+            62_760.0,
+            "incorrect volumetric energy content (J per litre)"
+        );
+        assert_relative_eq!(
+            matprop.volumetric_energy_content_kwh_per_litre(temp_high, temp_low),
+            0.01743333333,
+            max_relative = 1e-9
+        );
+    }
+}

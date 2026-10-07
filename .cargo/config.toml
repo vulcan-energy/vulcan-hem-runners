@@ -1,0 +1,30 @@
+[build]
+# Keep every crate and target in one repo-owned cache. This avoids parallel
+# hem-batch-core/target, wasm_wrapper/target, and solver target trees.
+target-dir = "../rust-hem-runner/.cargo-target"
+
+# `build-std` is intentionally passed only by scripts/deploy/build-wasm.sh.
+# Keeping it out of global config avoids rebuilding the sysroot for native checks.
+
+[profile.release-gate]
+# Native deploy checks need test semantics and useful line-number backtraces,
+# not full variable-level debug data or incremental object caches.
+inherits = "dev"
+debug = "line-tables-only"
+split-debuginfo = "packed"
+incremental = false
+
+[profile.release-gate.package."*"]
+# Keep line tables for the workspace package under test, but do not duplicate
+# dependency debug data across every statically linked integration-test binary.
+debug = "none"
+# Dependencies carry the numeric work — the HEM engine above all — and are the
+# part of the graph a CI cache can keep. Unoptimised, one native calculation
+# test alone took 150s of the release gate. Workspace crates stay unoptimised
+# unless their own manifest opts into release-gate optimisation; either way,
+# `inherits = "dev"` keeps debug assertions and overflow checks on everywhere.
+opt-level = 2
+
+# WASM target-feature flags live in scripts/deploy/build-wasm.sh — single source of truth.
+# Don't add rustflags here: env RUSTFLAGS overrides this block silently and the divergence
+# bit us before (+mutable-globals listed here, +simd128 only in the script).

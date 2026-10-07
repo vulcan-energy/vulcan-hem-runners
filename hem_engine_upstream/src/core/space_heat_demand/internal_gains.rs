@@ -1,0 +1,1844 @@
+use crate::compare_floats::min_of_2;
+use crate::core::controls::time_control::SmartApplianceControl;
+use crate::core::energy_supply::energy_supply::EnergySupplyConnection;
+use crate::core::schedule::validate_schedule_length;
+use crate::core::units::WATTS_PER_KILOWATT;
+use crate::input::{ApplianceGainsDetails, ApplianceGainsEvent, ApplianceLoadShifting};
+use crate::simulation_time::{SimulationTimeIteration, SimulationTimeIterator};
+use anyhow::{anyhow, bail};
+use atomic_float::AtomicF64;
+use itertools::Itertools;
+use parking_lot::RwLock;
+use smartstring::alias::String;
+use std::convert::TryInto;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+
+/// Arguments:
+/// * `total_internal_gains` - list of internal gains, in W/m2 (one entry per hour)
+/// * `start_day` - first day of time series, day of the year, 0 to 365
+/// * `time_series_step` - timestep of the time series data, in hours
+#[derive(Clone, Debug)]
+pub struct InternalGains {
+    total_internal_gains: Vec<f64>,
+    start_day: u32,
+    time_series_step: f64,
+}
+
+#[derive(Debug)]
+pub enum Gains {
+    Internal(InternalGains),
+    Appliance(ApplianceGains),
+    Event(EventApplianceGains),
+}
+
+impl Gains {
+    pub fn total_internal_gain_in_w(
+        &self,
+        zone_area: f64,
+        simtime: SimulationTimeIteration,
+    ) -> anyhow::Result<f64> {
+        match self {
+            Gains::Internal(internal) => Ok(internal.total_internal_gain_in_w(zone_area, simtime)),
+            Gains::Appliance(appliance) => appliance.total_internal_gain_in_w(zone_area, simtime),
+            Gains::Event(event_appliance_gains) => {
+                event_appliance_gains.total_internal_gain_in_w(zone_area, simtime)
+            }
+        }
+    }
+}
+
+impl InternalGains {
+    pub fn new(
+        total_internal_gains: Vec<f64>,
+        start_day: u32,
+        time_series_step: f64,
+        simulation_time_iterator: &SimulationTimeIterator,
+    ) -> anyhow::Result<Self> {
+        validate_schedule_length(
+            &total_internal_gains,
+            simulation_time_iterator
+                .total_steps_based_on_step(start_day, time_series_step.into())?,
+        )?;
+
+        Ok(InternalGains {
+            total_internal_gains,
+            start_day,
+            time_series_step,
+        })
+    }
+
+    /// Return the total internal gain for the current timestep in W
+    pub fn total_internal_gain_in_w(
+        &self,
+        zone_area: f64,
+        simtime: SimulationTimeIteration,
+    ) -> f64 {
+        self.total_internal_gains[simtime.time_series_idx(self.start_day, self.time_series_step)]
+            * zone_area
+    }
+}
+
+/// Arguments:
+/// * `total_energy_supply` - list of energy supply from appliances, in W/m2 (one entry per hour)
+/// * `connected_energy_supply` - reference to the energy supply attached to the specific appliance
+/// * `end_user_name` - name of the energy supply attached to the specific appliance
+/// * `gains_fraction` - fraction of energy supply which is counted as an internal gain
+/// * `start_day` - first day of time series, day of the year, 0 to 365
+/// * `time_series_step` - timestep of the time series data, in hours
+#[derive(Clone, Debug)]
+pub struct ApplianceGains {
+    total_energy_supply: Vec<f64>,
+    energy_supply_connection: EnergySupplyConnection,
+    gains_fraction: f64,
+    start_day: u32,
+    time_series_step: f64,
+}
+
+impl ApplianceGains {
+    pub(crate) fn new(
+        total_energy_supply: Vec<f64>,
+        gains_fraction: f64,
+        start_day: u32,
+        time_series_step: f64,
+        simulation_time_iterator: &SimulationTimeIterator,
+        energy_supply_connection: EnergySupplyConnection,
+    ) -> anyhow::Result<Self> {
+        validate_schedule_length(
+            &total_energy_supply,
+            simulation_time_iterator
+                .total_steps_based_on_step(start_day, time_series_step.into())?,
+        )?;
+
+        Ok(Self {
+            total_energy_supply,
+            gains_fraction,
+            start_day,
+            time_series_step,
+            energy_supply_connection,
+        })
+    }
+
+    /// Return the total internal gain for the current timestep in W
+    pub fn total_internal_gain_in_w(
+        &self,
+        zone_area: f64,
+        simtime: SimulationTimeIteration,
+    ) -> anyhow::Result<f64> {
+        let total_energy_supplied = self.total_energy_supply
+            [simtime.time_series_idx(self.start_day, self.time_series_step)];
+        let total_energy_supplied_w = total_energy_supplied * zone_area;
+        let total_energy_supplied_kwh =
+            total_energy_supplied_w / WATTS_PER_KILOWATT as f64 * simtime.timestep;
+
+        self.energy_supply_connection
+            .demand_energy(total_energy_supplied_kwh, simtime.index)?;
+
+        Ok(total_energy_supplied_w * self.gains_fraction)
+    }
+}
+
+/// An object to represent internal gains and energy consumption from appliances
+#[derive(Debug)]
+pub struct EventApplianceGains {
+    energy_supply_conn: EnergySupplyConnection,
+    energy_supply_name: String,
+    gains_fraction: f64,
+    _start_day: u32,
+    time_series_step: f64,
+    _series_length: usize,
+    load_shifting_metadata: Option<LoadShiftingMetadata>,
+    max_shift: Option<f64>,
+    usage_events: Arc<RwLock<Vec<ApplianceGainsEvent>>>,
+    total_floor_area: f64,
+    total_power_supply: Vec<AtomicF64>,
+    standby_power: f64,
+    smart_control: Option<Arc<SmartApplianceControl>>,
+    simulation_timestep_count: usize,
+    simulation_timestep: f64,
+}
+
+impl EventApplianceGains {
+    ///  Arguments:
+    ///  * `energy_supply_connection` -- reference to EnergySupplyConnection object representing
+    ///                                 the electricity supply attached to the appliance
+    ///  * `simulation_time`          -- reference to SimulationTime object
+    ///  * `appliance_data`           -- dictionary of appliance gains data from project dict, including:
+    ///                                 gains_fraction    -- proportion of appliance demand turned into heat gains
+    ///                                 start_day         -- first day of the time series, day of the year, 0 to 365 (single value)
+    ///                                 time_series_step  -- timestep of the time series data, in hours
+    ///                                 Standby           -- appliance power consumption when not in use in Watts
+    ///                                 Events            -- list of appliance usage events, which are dictionaries,
+    ///                                                      containing demand_W, start and duration,
+    ///                                                      with start and duration in hours
+    ///                                 loadshifting      -- (optional) dictionary defining loadshifting parameters
+    ///                                                          max_shift_hrs         - the maximum time, in hours, that an event
+    ///                                                                                  may be shifted away from when it was originally
+    ///                                                                                  intended to occur. This may be up to 24 hours.
+    ///                                                          weight_timeseries     - this may be, for example, the hourly cost per
+    ///                                                                                  kWh of a 7hr tariff, but could be any time series.
+    ///                                                                                  The sum of the other demand and the demand of the
+    ///                                                                                  appliance in question at any given time is multiplied
+    ///                                                                                  by the value of this timeseries to obtain a figure
+    ///                                                                                  that is used to determine whether to shift an event,
+    ///                                                                                  and when would be the most appropriate time to shift
+    ///                                                                                  the event to.
+    ///                                                          demand_limit_weighted - value above which the sum demand multiplied by the
+    ///                                                                                  weight should not exceed. If a 7hr tariff were used for
+    ///                                                                                  the weight timeseries, then this would be a cost. If this value
+    ///                                                                                  is 0, then all events will be shifted to the optimal time
+    ///                                                                                  within the window, otherwise they will be shifted to the earliest
+    ///                                                                                  time at which the weighted demand goes below the limit.
+    ///                                                                                  (if there is no time in the window when the weighted demand is below
+    ///                                                                                  the limit, then the optimum is chosen.)
+    ///  * `total_floor_area`                      -- total floor area of dwelling
+    ///  * `smart_control`            -- (optional) reference to a smart control (required for loadshifting, otherwise not needed)
+    pub(crate) fn new(
+        energy_supply_conn: EnergySupplyConnection,
+        simulation_time: &SimulationTimeIterator,
+        appliance_data: &ApplianceGainsDetails,
+        total_floor_area: f64,
+        smart_control: Option<Arc<SmartApplianceControl>>,
+    ) -> anyhow::Result<Self> {
+        let standby_power = appliance_data
+            .standby
+            .ok_or_else(|| anyhow!("standby is expected for EventApplianceGains"))?;
+        let usage_events = appliance_data
+            .events
+            .as_ref()
+            .map(|events| {
+                events
+                    .iter()
+                    .cloned()
+                    .sorted_by(|event1, event2| event1.start.total_cmp(&event2.start))
+                    .collect()
+            })
+            .ok_or_else(|| anyhow!("events are expected for EventApplianceGains"))?;
+        let load_shifting_metadata = appliance_data
+            .load_shifting
+            .as_ref()
+            .map(|load_shifting| anyhow::Ok::<LoadShiftingMetadata>(load_shifting.try_into()?))
+            .transpose()?;
+        let time_series_step = appliance_data.time_series_step;
+        let series_length = (simulation_time.total_steps() as f64 * simulation_time.step_in_hours()
+            / time_series_step)
+            .ceil() as usize;
+        let max_shift = appliance_data
+            .load_shifting
+            .as_ref()
+            .map(|value| value.max_shift_hrs / simulation_time.step_in_hours());
+
+        let gains = Self {
+            energy_supply_conn,
+            energy_supply_name: appliance_data.energy_supply.clone(),
+            gains_fraction: appliance_data.gains_fraction,
+            _start_day: appliance_data.start_day,
+            time_series_step,
+            _series_length: series_length,
+            load_shifting_metadata,
+            max_shift,
+            usage_events: Arc::new(RwLock::new(usage_events)),
+            total_floor_area,
+            total_power_supply: [standby_power]
+                .into_iter()
+                .cycle()
+                .take(simulation_time.total_steps())
+                .map(AtomicF64::new)
+                .collect(),
+            standby_power,
+            smart_control: appliance_data
+                .load_shifting
+                .as_ref()
+                .map(|_| {
+                    smart_control.ok_or_else(|| {
+                        anyhow!("Smart control is required when appliance uses load shifting.")
+                    })
+                })
+                .transpose()?,
+            simulation_timestep_count: simulation_time.total_steps(),
+            simulation_timestep: simulation_time.step_in_hours(),
+        };
+
+        Self::process_events(&gains, simulation_time.current_iteration())?;
+
+        Ok(gains)
+    }
+
+    fn process_events(&self, simtime: SimulationTimeIteration) -> anyhow::Result<()> {
+        // adds demand from events  to the total annual demand. If there is loadshifting the demand
+        // of the event may occur in the future rather than at the time specified
+        for event in self.usage_events.read().iter() {
+            let (start_idx, power_timesteps) = self.process_event(event)?;
+            // Prevent this from including events that start after the end of the simulation.
+            if start_idx > self.simulation_timestep_count {
+                continue;
+            }
+            for (i, power) in power_timesteps.iter().enumerate() {
+                let t_idx = min_of_2(start_idx + i, self.simulation_timestep_count - 1);
+                self.total_power_supply[t_idx].fetch_add(*power, Ordering::SeqCst);
+                if let Some(smart_control) = self.smart_control.as_ref() {
+                    smart_control.add_appliance_demand(
+                        t_idx,
+                        power / WATTS_PER_KILOWATT as f64 * self.simulation_timestep,
+                        &self.energy_supply_name,
+                        simtime,
+                    )
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn process_event(&self, event: &ApplianceGainsEvent) -> anyhow::Result<(usize, Vec<f64>)> {
+        let (start_idx, power_list_over_timesteps) = self.event_to_schedule(event)?;
+
+        let start_shift = if self.max_shift.is_some() {
+            self.shift_iterative(start_idx, &power_list_over_timesteps, event)?
+        } else {
+            0
+        };
+
+        Ok((start_idx + start_shift, power_list_over_timesteps))
+    }
+
+    /// shifts an event forward in time one timestep at a time,
+    /// until either the total weighted demand on that timestep is below demandlimit
+    /// or the event has been shifted beyond the maximum allowed number of timesteps
+    /// away from its original position. In the latter case, move the event to the
+    /// most favourable time within the allowed window
+    fn shift_iterative(
+        &self,
+        start_idx: usize,
+        power_list_over_timesteps: &[f64],
+        event: &ApplianceGainsEvent,
+    ) -> anyhow::Result<usize> {
+        // pos list will store the total weighted demand (including from the rest of the dwelling)
+        // for the usage event happening at the intended time, or 1 timestep into the future, or 2, up to
+        // the max shift time.
+        // the lowest value in this list will represent the time at which the usage event would result in the
+        // lowest demand.
+
+        let pos_list_len = (self
+            .max_shift
+            .ok_or(anyhow!("Max shift should not be None"))?
+            + 1.)
+            .ceil() as usize;
+        let mut pos_list = vec![0.; pos_list_len];
+        for (start_shift, pos_list_entry) in pos_list.iter_mut().enumerate() {
+            for (i, power) in power_list_over_timesteps.iter().enumerate() {
+                let t_idx = min_of_2(
+                    start_idx + i + start_shift,
+                    self.simulation_timestep_count - 1,
+                );
+                let series_idx = (t_idx as f64 * self.simulation_timestep / self.time_series_step)
+                    .floor() as usize;
+                let weight_timeseries = &self
+                    .load_shifting_metadata
+                    .as_ref()
+                    .ok_or_else(|| {
+                        anyhow!("Internal gains event processing expects load shifting to be set.")
+                    })?
+                    .weight_timeseries;
+
+                let timestep_total_power_supply =
+                    self.total_power_supply[t_idx].load(Ordering::SeqCst);
+                if timestep_total_power_supply > event.demand_w
+                    || is_close!(
+                        timestep_total_power_supply,
+                        event.demand_w,
+                        rel_tol = 1e-9,
+                        abs_tol = 0.0
+                    )
+                {
+                    // the appliance is already turned on for the entire timestep
+                    // cannot put an event here
+                    // put arbitrarily high demand at this position so it is not picked
+                    *pos_list_entry += 10_000. * weight_timeseries[series_idx];
+                    break;
+                }
+
+                let other_demand = if let Some(smart_control) = &self.smart_control {
+                    smart_control.get_demand(t_idx, &self.energy_supply_name)
+                } else {
+                    0.
+                };
+
+                let new_demand = power / WATTS_PER_KILOWATT as f64 * self.simulation_timestep;
+                *pos_list_entry += (new_demand + other_demand) * weight_timeseries[series_idx];
+            }
+            let demand_limit = self
+                .load_shifting_metadata
+                .as_ref()
+                .map(|data| data.demand_limit);
+
+            if let Some(limit) = demand_limit {
+                if limit > 0. && *pos_list_entry < limit {
+                    return Ok(start_shift);
+                }
+            }
+        }
+
+        let min_in_pos_list = *pos_list
+            .iter()
+            .min_by(|&a, &b| a.total_cmp(b))
+            .ok_or_else(|| anyhow!("Insufficient max shift size for appliance gains."))?;
+        Ok(pos_list
+            .iter()
+            .position(|&r| r == min_in_pos_list)
+            .expect("Position expected to be findable for minimum value in a list."))
+    }
+
+    fn event_to_schedule(
+        &self,
+        usage_event: &ApplianceGainsEvent,
+    ) -> anyhow::Result<(usize, Vec<f64>)> {
+        let ApplianceGainsEvent {
+            start,
+            duration,
+            demand_w: demand_w_event,
+        } = *usage_event;
+        let start_offset = start % self.simulation_timestep;
+        let start_idx = (start / self.simulation_timestep).floor() as usize;
+        let timestep = self.simulation_timestep;
+
+        // if the event overruns the end of the timestep it starts in,
+        // power needs to be allocated to two (or more) timesteps
+        // according to the length of time within each timestep the appliance is being used for
+        let mut time_allocated_total = 0.0;
+        let mut power_timesteps: Vec<f64> = Default::default();
+        while time_allocated_total < duration {
+            let time_unallocated = duration - time_allocated_total;
+            let time_allocated_this_timestep = timestep.min(time_unallocated);
+            // subtract standby power from the added event power
+            // as it is already accounted for when the list is initialised
+            power_timesteps.push(
+                (demand_w_event - self.standby_power) * (time_allocated_this_timestep / timestep),
+            );
+            time_allocated_total += time_allocated_this_timestep;
+        }
+
+        // if power_timesteps is empty, following code will fail, so error out
+        if power_timesteps.is_empty() {
+            bail!("Empty set of power timesteps encountered when creating appliance gains schedule from event")
+        }
+
+        // If event starts part-way through a timestep, shift some of the demand from the starting
+        // timestep to the end timestep (spilling over into the next one if necessary)
+        let power_offset = (start_offset / timestep) * power_timesteps[0];
+        *power_timesteps.first_mut().unwrap() -= power_offset;
+        *power_timesteps.last_mut().unwrap() += power_offset;
+        let power_overflow = f64::max(
+            0.0,
+            *power_timesteps.last().unwrap() - (demand_w_event - self.standby_power),
+        );
+        *power_timesteps.last_mut().unwrap() -= power_overflow;
+        power_timesteps.push(power_overflow);
+
+        Ok((start_idx, power_timesteps))
+    }
+
+    /// Return the total internal gain for the current timestep, in W
+    pub(crate) fn total_internal_gain_in_w(
+        &self,
+        zone_area: f64,
+        simtime: SimulationTimeIteration,
+    ) -> anyhow::Result<f64> {
+        // Forward electricity demand (in kWh) to relevant EnergySupply object
+        let total_power_supplied = self.total_power_supply[simtime.index].load(Ordering::SeqCst);
+        let total_power_supplied_zone = total_power_supplied * zone_area / self.total_floor_area;
+        let total_energy_supplied_kwh =
+            total_power_supplied_zone / WATTS_PER_KILOWATT as f64 * simtime.timestep;
+
+        self.energy_supply_conn
+            .demand_energy(total_energy_supplied_kwh, simtime.index)?;
+
+        Ok(total_power_supplied_zone * self.gains_fraction)
+    }
+}
+
+#[derive(Clone, Debug)]
+struct LoadShiftingMetadata {
+    weight_timeseries: Vec<f64>,
+    demand_limit: f64,
+}
+
+impl TryFrom<&ApplianceLoadShifting> for LoadShiftingMetadata {
+    type Error = anyhow::Error;
+
+    fn try_from(input: &ApplianceLoadShifting) -> Result<Self, Self::Error> {
+        Ok(Self {
+            weight_timeseries: input.weight_timeseries.clone(),
+            demand_limit: input.demand_limit_weighted,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::*;
+
+    mod internal_gains {
+        use super::*;
+        use crate::core::space_heat_demand::internal_gains::InternalGains;
+        use crate::simulation_time::{SimulationTime, SimulationTimeIterator};
+        use pretty_assertions::assert_eq;
+
+        #[fixture]
+        fn simtime() -> SimulationTimeIterator {
+            SimulationTime::new(0.0, 4.0, 1.0).iter()
+        }
+
+        #[rstest]
+        fn test_total_internal_gain(simtime: SimulationTimeIterator) {
+            let internal_gains = InternalGains {
+                total_internal_gains: vec![3.2, 4.6, 7.3, 5.2],
+                start_day: 0,
+                time_series_step: 1.0,
+            };
+            let expected = [32.0, 46.0, 73.0, 52.0];
+            for iteration in simtime {
+                assert_eq!(
+                    internal_gains.total_internal_gain_in_w(10.0, iteration,),
+                    expected[iteration.time_series_idx(
+                        internal_gains.start_day,
+                        internal_gains.time_series_step
+                    )]
+                );
+            }
+        }
+    }
+
+    mod appliance_gains {
+        use crate::core::energy_supply::energy_supply::{EnergySupply, EnergySupplyBuilder};
+        use crate::core::space_heat_demand::internal_gains::ApplianceGains;
+        use crate::hem_core::simulation_time::{SimulationTime, SimulationTimeIterator};
+        use crate::input::FuelType;
+        use parking_lot::RwLock;
+        use rstest::{fixture, rstest};
+        use std::sync::Arc;
+
+        #[fixture]
+        fn simtime() -> SimulationTimeIterator {
+            SimulationTime::new(0.0, 4.0, 1.0).iter()
+        }
+
+        #[rstest]
+        fn test_total_internal_gain(simtime: SimulationTimeIterator) {
+            let energy_supply = Arc::new(RwLock::new(
+                EnergySupplyBuilder::new(FuelType::Electricity, simtime.total_steps()).build(),
+            ));
+            let energy_supply_connection =
+                EnergySupply::connection(energy_supply.clone(), "lighting").unwrap();
+            let total_energy_supply = vec![32.0, 46.0, 30.0, 20.0];
+            let total_internal_gains = [160.0, 230.0, 150.0, 100.0];
+            let expected_energy_supply_results = [0.32, 0.46, 0.30, 0.20];
+            let appliance_gains = ApplianceGains {
+                total_energy_supply,
+                energy_supply_connection,
+                gains_fraction: 0.5,
+                start_day: 0,
+                time_series_step: 1.0,
+            };
+            for iteration in simtime.clone() {
+                pretty_assertions::assert_eq!(
+                    appliance_gains
+                        .total_internal_gain_in_w(10.0, iteration)
+                        .unwrap(),
+                    total_internal_gains[iteration.index]
+                );
+                pretty_assertions::assert_eq!(
+                    energy_supply.read().results_by_end_user()["lighting"][iteration.index],
+                    expected_energy_supply_results[iteration.index],
+                    "incorrect electricity demand returned"
+                );
+            }
+        }
+    }
+
+    mod event_appliance_gains {
+        use crate::core::controls::time_control::SmartApplianceControl;
+        use crate::core::energy_supply::energy_supply::{
+            EnergySupply, EnergySupplyBuilder, EnergySupplyConnection,
+        };
+        use crate::core::space_heat_demand::internal_gains::EventApplianceGains;
+        use crate::hem_core::simulation_time::SimulationTime;
+        use crate::input::{
+            ApplianceGainsDetails, ApplianceGainsEvent, FuelType, SmartApplianceBattery,
+        };
+        use indexmap::IndexMap;
+        use parking_lot::RwLock;
+        use rstest::{fixture, rstest};
+        use std::sync::Arc;
+
+        #[fixture]
+        fn simtime() -> SimulationTime {
+            SimulationTime::new(0.0, 24.0, 0.5)
+        }
+
+        #[fixture]
+        fn total_floor_area() -> f64 {
+            100.
+        }
+
+        #[fixture]
+        #[once]
+        fn energy_supply(simtime: SimulationTime) -> Arc<RwLock<EnergySupply>> {
+            Arc::new(RwLock::new(
+                EnergySupplyBuilder::new(FuelType::Electricity, simtime.total_steps()).build(),
+            ))
+        }
+
+        #[fixture]
+        #[once]
+        fn energy_supply_connection(
+            energy_supply: &Arc<RwLock<EnergySupply>>,
+        ) -> EnergySupplyConnection {
+            EnergySupply::connection(energy_supply.clone(), "new_connection").unwrap()
+        }
+
+        #[fixture]
+        fn appliance_data() -> ApplianceGainsDetails {
+            serde_json::from_value(serde_json::json!({
+                "EnergySupply": "mains elec",
+                "start_day": 0,
+                "time_series_step": 1,
+                "gains_fraction": 0.7,
+                "Events": [
+                    {"start": 0.1, "duration": 1.75, "demand_W": 900.0},
+                    {"start": 5.3, "duration": 1.50, "demand_W": 900.0},
+                    {"start": 25.3, "duration": 1.50, "demand_W": 900.0},
+                ],
+                "Standby": 0.5,
+                "loadshifting":
+                {
+                    "demand_limit_weighted": 0,
+                    "max_shift_hrs": 8,
+                    "weight_timeseries": [
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0,
+                    ]
+                },
+            }))
+            .unwrap()
+        }
+
+        #[fixture]
+        #[once]
+        fn smart_control(
+            appliance_data: ApplianceGainsDetails,
+            energy_supply: &Arc<RwLock<EnergySupply>>,
+            simtime: SimulationTime,
+        ) -> Arc<SmartApplianceControl> {
+            // the following is provided in an invalid place in the Python fixture (power_timeseries in appliance_data),
+            // so providing power timeseries data separately here as data structure matters in the Rust
+            let power_timeseries = vec![
+                77.70823134533667,
+                70.07710122045972,
+                66.26153469022015,
+                62.445968159980595,
+                58.6304045653432,
+                66.26153469022015,
+                81.52379787557622,
+                872.7293737820189,
+                448.95976141145366,
+                146.38841421163792,
+                150.20398074187744,
+                246.13290374339178,
+                157.8351108667544,
+                146.38841421163792,
+                150.20398074187744,
+                236.48451946096566,
+                1235.1378596577206,
+                257.03982010376774,
+                801.2313187689566,
+                207.4374669530622,
+                192.17520376770614,
+                290.41445627425867,
+                138.757284086761,
+                100.60162759117186,
+                77.70823134533667,
+            ];
+            let non_appliance_demand_24hr = IndexMap::from([(
+                "mains elec".into(),
+                vec![
+                    0.06830825101566576,
+                    0.060105811973985415,
+                    0.05305939286989522,
+                    0.0501236916686892,
+                    0.011659722362322093,
+                    0.009841650327447332,
+                    0.008628179127672608,
+                    0.00780480411138585,
+                    0.007342238555297734,
+                    0.0068683142767418555,
+                    0.007092339066083696,
+                    0.0073738789491060025,
+                    0.00890318157456338,
+                    0.013196350717229778,
+                    3.8185258665440713,
+                    3.686604856404327,
+                    3.321741503132428,
+                    2.1009771847288543,
+                    1.9577604381160962,
+                    0.982853996628817,
+                    -0.4690062980892011,
+                    -0.47106808673125095,
+                    -0.440083286258449,
+                    -0.4402744803667663,
+                    -0.275893537706527,
+                    -0.27582574287859735,
+                    -0.02364598193865506,
+                    -0.022770656131003677,
+                    0.006386180325667274,
+                    1.1838622352604393,
+                    0.016880847238056107,
+                    0.022939243503258204,
+                    0.03451315625040322,
+                    3.6710272517570663,
+                    3.4183577199797917,
+                    3.259661970488036,
+                    2.382744591886866,
+                    3.347517299485186,
+                    2.8633293436146374,
+                    2.194481295688944,
+                    2.0245859635409174,
+                    2.160933115928409,
+                    2.1559541166936143,
+                    2.078707457615306,
+                    0.06082872713634447,
+                    0.05498437799409048,
+                    0.04615437212925211,
+                    0.036699730049032445,
+                ],
+            )]);
+            let battery24hr: SmartApplianceBattery = serde_json::from_value(serde_json::json!({
+                "battery_state_of_charge": {
+                    "mains elec": [
+                                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0
+                    ]
+                }
+            }))
+            .unwrap();
+
+            SmartApplianceControl::new(
+                &IndexMap::from([("mains elec".into(), power_timeseries)]),
+                appliance_data.time_series_step,
+                &simtime.iter(),
+                non_appliance_demand_24hr,
+                battery24hr,
+                &IndexMap::from([("mains elec".into(), energy_supply.clone())]),
+                vec!["Clothes_drying".into()],
+            )
+            .unwrap()
+            .into()
+        }
+
+        #[fixture]
+        fn smart_control_for_process_event(
+            appliance_data: ApplianceGainsDetails,
+            energy_supply: &Arc<RwLock<EnergySupply>>,
+            simtime: SimulationTime,
+        ) -> Arc<SmartApplianceControl> {
+            // using custom fixture with adjusted power timeseries to match the side effects
+            // that happen to the smart control during the test set up in the Python
+            let power_timeseries = vec![
+                77.70823134533667,
+                70.07710122045972,
+                66.26153469022015,
+                871.9959681599806,
+                823.2054045653432,
+                66.26153469022015,
+                81.52379787557622,
+                872.7293737820189,
+                448.95976141145366,
+                146.38841421163792,
+                779.8539807418776,
+                965.7329037433917,
+                157.8351108667544,
+                146.38841421163792,
+                150.20398074187744,
+                236.48451946096566,
+                1235.1378596577206,
+                257.03982010376774,
+                801.2313187689566,
+                207.4374669530622,
+                192.17520376770614,
+                290.41445627425867,
+                138.757284086761,
+                100.60162759117186,
+                77.70823134533667,
+            ];
+            let non_appliance_demand_24hr = IndexMap::from([(
+                "mains elec".into(),
+                vec![
+                    0.06830825101566576,
+                    0.060105811973985415,
+                    0.05305939286989522,
+                    0.0501236916686892,
+                    0.011659722362322093,
+                    0.009841650327447332,
+                    0.008628179127672608,
+                    0.00780480411138585,
+                    0.007342238555297734,
+                    0.0068683142767418555,
+                    0.007092339066083696,
+                    0.0073738789491060025,
+                    0.00890318157456338,
+                    0.013196350717229778,
+                    3.8185258665440713,
+                    3.686604856404327,
+                    3.321741503132428,
+                    2.1009771847288543,
+                    1.9577604381160962,
+                    0.982853996628817,
+                    -0.4690062980892011,
+                    -0.47106808673125095,
+                    -0.440083286258449,
+                    -0.4402744803667663,
+                    -0.275893537706527,
+                    -0.27582574287859735,
+                    -0.02364598193865506,
+                    -0.022770656131003677,
+                    0.006386180325667274,
+                    1.1838622352604393,
+                    0.016880847238056107,
+                    0.022939243503258204,
+                    0.03451315625040322,
+                    3.6710272517570663,
+                    3.4183577199797917,
+                    3.259661970488036,
+                    2.382744591886866,
+                    3.347517299485186,
+                    2.8633293436146374,
+                    2.194481295688944,
+                    2.0245859635409174,
+                    2.160933115928409,
+                    2.1559541166936143,
+                    2.078707457615306,
+                    0.06082872713634447,
+                    0.05498437799409048,
+                    0.04615437212925211,
+                    0.036699730049032445,
+                ],
+            )]);
+            let battery24hr: SmartApplianceBattery = serde_json::from_value(serde_json::json!({
+                "battery_state_of_charge": {
+                    "mains elec": [
+                                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                0, 0, 0, 0, 0, 0
+                    ]
+                }
+            }))
+            .unwrap();
+
+            SmartApplianceControl::new(
+                &IndexMap::from([("mains elec".into(), power_timeseries)]),
+                appliance_data.time_series_step,
+                &simtime.iter(),
+                non_appliance_demand_24hr,
+                battery24hr,
+                &IndexMap::from([("mains elec".into(), energy_supply.clone())]),
+                vec!["Clothes_drying".into()],
+            )
+            .unwrap()
+            .into()
+        }
+
+        #[fixture]
+        fn event_appliance_gains(
+            appliance_data: ApplianceGainsDetails,
+            simtime: SimulationTime,
+            smart_control: &Arc<SmartApplianceControl>,
+            total_floor_area: f64,
+            energy_supply_connection: &EnergySupplyConnection,
+        ) -> EventApplianceGains {
+            EventApplianceGains::new(
+                energy_supply_connection.clone(),
+                &simtime.iter(),
+                &appliance_data,
+                total_floor_area,
+                Some(smart_control.clone()),
+            )
+            .unwrap()
+        }
+
+        #[rstest]
+        fn test_process_event(
+            mut appliance_data: ApplianceGainsDetails,
+            energy_supply_connection: &EnergySupplyConnection,
+            simtime: SimulationTime,
+            total_floor_area: f64,
+            smart_control_for_process_event: Arc<SmartApplianceControl>,
+        ) {
+            let event = ApplianceGainsEvent {
+                start: 3.,
+                duration: 1.75,
+                demand_w: 900.0,
+            };
+
+            appliance_data.events.replace(vec![]);
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection.clone(),
+                &simtime.iter(),
+                &appliance_data,
+                total_floor_area,
+                Some(smart_control_for_process_event),
+            )
+            .unwrap();
+
+            pretty_assertions::assert_eq!(
+                event_appliance_gains.process_event(&event).unwrap(),
+                (21, vec![899.5, 899.5, 899.5, 449.75, 0.0])
+            );
+        }
+
+        #[rstest]
+        fn test_event_to_schedule(
+            mut appliance_data: ApplianceGainsDetails,
+            smart_control: &Arc<SmartApplianceControl>,
+            energy_supply_connection: &EnergySupplyConnection,
+            simtime: SimulationTime,
+            total_floor_area: f64,
+        ) {
+            let event = ApplianceGainsEvent {
+                start: 3.,
+                duration: 1.75,
+                demand_w: 900.0,
+            };
+
+            appliance_data.events.replace(vec![]);
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection.clone(),
+                &simtime.iter(),
+                &appliance_data,
+                total_floor_area,
+                Some(smart_control.clone()),
+            )
+            .unwrap();
+
+            pretty_assertions::assert_eq!(
+                event_appliance_gains.event_to_schedule(&event).unwrap(),
+                (6, vec![899.5, 899.5, 899.5, 449.75, 0.0])
+            );
+        }
+
+        #[rstest]
+        fn test_total_internal_gain(
+            event_appliance_gains: EventApplianceGains,
+            simtime: SimulationTime,
+            total_floor_area: f64,
+        ) {
+            let res = simtime
+                .iter()
+                .map(|simtime| {
+                    event_appliance_gains.total_internal_gain_in_w(total_floor_area, simtime)
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            pretty_assertions::assert_eq!(
+                res,
+                vec![
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    504.07,
+                    630.0,
+                    630.0,
+                    441.10499999999996,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    252.21000000000018,
+                    630.0,
+                    630.0,
+                    378.1399999999999,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35,
+                    0.35
+                ]
+            );
+        }
+
+        #[rstest]
+        fn test_shift_iterative(
+            mut appliance_data: ApplianceGainsDetails,
+            energy_supply_connection: &EnergySupplyConnection,
+            smart_control: &Arc<SmartApplianceControl>,
+            total_floor_area: f64,
+            simtime: SimulationTime,
+        ) {
+            let event = ApplianceGainsEvent {
+                start: 2.33,
+                duration: 1.0,
+                demand_w: 900.,
+            };
+            let (s, a) = (5usize, [600., 300.]);
+
+            appliance_data.events.replace(vec![]);
+
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection.clone(),
+                &simtime.iter(),
+                &appliance_data,
+                total_floor_area,
+                Some(smart_control.clone()),
+            )
+            .unwrap();
+
+            pretty_assertions::assert_eq!(
+                event_appliance_gains
+                    .shift_iterative(s, &a, &event)
+                    .unwrap(),
+                15
+            );
+        }
+    }
+
+    mod event_appliance_gains_total_internal_gain {
+        use crate::core::controls::time_control::SmartApplianceControl;
+        use crate::core::energy_supply::energy_supply::{
+            EnergySupply, EnergySupplyBuilder, EnergySupplyConnection,
+        };
+        use crate::core::space_heat_demand::internal_gains::{ApplianceGains, EventApplianceGains};
+        use crate::hem_core::simulation_time::{SimulationTime, SimulationTimeIterator};
+        use crate::input::{
+            ApplianceGainsDetails, ApplianceGainsEvent, FuelType, SmartApplianceBattery,
+        };
+        use indexmap::IndexMap;
+        use parking_lot::RwLock;
+        use rstest::*;
+        use serde_json::json;
+        use std::sync::Arc;
+
+        fn simulation_time() -> SimulationTime {
+            SimulationTime::new(0.0, 12.0, 1.)
+        }
+
+        fn simulation_time_iterator() -> SimulationTimeIterator {
+            simulation_time().iter()
+        }
+
+        fn energy_supply() -> Arc<RwLock<EnergySupply>> {
+            Arc::new(RwLock::new(
+                EnergySupplyBuilder::new(
+                    FuelType::Electricity,
+                    simulation_time_iterator().total_steps(),
+                )
+                .build(),
+            ))
+        }
+
+        fn energy_supply_connection() -> EnergySupplyConnection {
+            EnergySupply::connection(energy_supply(), "lighting").unwrap()
+        }
+
+        fn total_energy_supply() -> Vec<f64> {
+            vec![100.; 12]
+        }
+
+        fn appliance_gains() -> ApplianceGains {
+            ApplianceGains {
+                total_energy_supply: total_energy_supply(),
+                energy_supply_connection: energy_supply_connection(),
+                gains_fraction: 0.5,
+                start_day: 0,
+                time_series_step: 1.0,
+            }
+        }
+
+        #[fixture]
+        fn appliance_data() -> ApplianceGainsDetails {
+            serde_json::from_value(json!({
+                // "type": "Clothes_drying", // there is no type field on ApplianceGainsDetails, though including in upstream Python fixture
+                "EnergySupply": "mains elec",
+                "start_day": 0,
+                "time_series_step": 1.,
+                "gains_fraction": 0.7,
+                "loadshifting": {
+                    "demand_limit_weighted": 0,
+                    // "power_timeseries": [100., 100., 100., 100., 100., 100., 100., 100., 100., 100., 100., 100.], // power_timeseries is listed in Python test but no longer on this type
+                    "max_shift_hrs": 8,
+                    // "weight": "Tariff", // there is no weight field, but this entry in the JSON remains in the Python fixture
+                    "weight_timeseries": [1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.],
+                }
+            }))
+            .unwrap()
+        }
+
+        fn total_floor_area() -> f64 {
+            100.
+        }
+
+        fn smart_control() -> SmartApplianceControl {
+            let power_timeseries = vec![
+                100., 100., 100., 100., 100., 100., 100., 100., 100., 100., 100., 100.,
+            ];
+            let time_series_step = 1.;
+            let non_appliance_demand_24hr = IndexMap::from([(
+                "mains elec".into(),
+                vec![
+                    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+                    0., 0., 0., 0.,
+                ],
+            )]);
+            let battery24hr: SmartApplianceBattery = serde_json::from_value(serde_json::json!({
+                "battery_state_of_charge": { "mains elec": [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,0, 0, 0, 0, 0, 0 ]}
+            })).unwrap();
+
+            SmartApplianceControl::new(
+                &IndexMap::from([("mains elec".into(), power_timeseries)]),
+                time_series_step,
+                &simulation_time_iterator(),
+                non_appliance_demand_24hr,
+                battery24hr,
+                &IndexMap::from([("mains elec".into(), energy_supply())]),
+                vec!["Clothes_drying".into()],
+            )
+            .unwrap()
+        }
+
+        #[rstest]
+        /// Test that there are always gains from standby power
+        fn test_standby(mut appliance_data: ApplianceGainsDetails) {
+            let zone_area = 10.;
+            let standby = 10.;
+
+            appliance_data.standby.replace(standby);
+            appliance_data.events.replace(vec![]);
+
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection(),
+                &simulation_time_iterator(),
+                &appliance_data,
+                total_floor_area(),
+                Some(smart_control().into()), // MagicMock used in Python - we've made some data up here
+            )
+            .unwrap();
+
+            for iteration in simulation_time_iterator() {
+                assert_eq!(
+                    event_appliance_gains
+                        .total_internal_gain_in_w(zone_area, iteration)
+                        .unwrap(),
+                    0.7
+                );
+            }
+        }
+        #[rstest]
+        /// Test that there are gains from a single appliance
+        fn test_single_appliance(mut appliance_data: ApplianceGainsDetails) {
+            let zone_area = 10.;
+            let standby = 0.;
+
+            appliance_data.standby.replace(standby);
+            appliance_data.gains_fraction = 1.;
+            appliance_data.events.replace(vec![ApplianceGainsEvent {
+                start: 5.,
+                duration: 2.,
+                demand_w: 900.,
+            }]);
+
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection(),
+                &simulation_time_iterator(),
+                &appliance_data,
+                total_floor_area(),
+                Some(smart_control().into()),
+            )
+            .unwrap();
+
+            let expected = [0., 0., 0., 0., 0., 90., 90., 0., 0., 0., 0., 0.];
+            for iteration in simulation_time_iterator() {
+                assert_eq!(
+                    event_appliance_gains
+                        .total_internal_gain_in_w(zone_area, iteration)
+                        .unwrap(),
+                    expected[iteration.index]
+                );
+            }
+        }
+        #[rstest]
+        /// Test that smartcontrol.add_appliance_demand is called with the load
+        /// Note that in Python a Spy is used, instead we assert on the result of
+        /// `total_internal_gain_in_w`. This means the two tests are not equivalent.
+        fn test_smart_control_called(mut appliance_data: ApplianceGainsDetails) {
+            let zone_area = 10.;
+            let standby = 0.;
+
+            appliance_data.standby.replace(standby);
+            appliance_data.gains_fraction = 0.5;
+            if let Some(loadshifting) = appliance_data.load_shifting.as_mut() {
+                loadshifting.max_shift_hrs = 10.;
+            }
+            appliance_data.events.replace(vec![ApplianceGainsEvent {
+                start: 5.,
+                duration: 2.,
+                demand_w: 900.,
+            }]);
+
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection(),
+                &simulation_time_iterator(),
+                &appliance_data,
+                total_floor_area(),
+                Some(smart_control().into()),
+            )
+            .unwrap();
+
+            let expected = [0., 0., 0., 0., 0., 45., 45., 0., 0., 0., 0., 0.];
+            for iteration in simulation_time_iterator() {
+                assert_eq!(
+                    event_appliance_gains
+                        .total_internal_gain_in_w(zone_area, iteration)
+                        .unwrap(),
+                    expected[iteration.index]
+                );
+            }
+        }
+
+        #[rstest]
+        /// Test that the lowest weighted power is used for load shifting
+        fn test_weighted_loadshifting(mut appliance_data: ApplianceGainsDetails) {
+            let zone_area = 10.;
+            let standby = 0.;
+
+            appliance_data.standby.replace(standby);
+            appliance_data.gains_fraction = 1.;
+            if let Some(loadshifting) = appliance_data.load_shifting.as_mut() {
+                loadshifting.max_shift_hrs = 10.;
+                loadshifting.weight_timeseries =
+                    vec![0., 0., 0., 0., 0., 0., 1., 1., 0.2, 0.2, 0.2, 0.2];
+            }
+            appliance_data.events.replace(vec![ApplianceGainsEvent {
+                start: 5.,
+                duration: 2.,
+                demand_w: 900.,
+            }]);
+
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection(),
+                &simulation_time_iterator(),
+                &appliance_data,
+                total_floor_area(),
+                Some(smart_control().into()),
+            )
+            .unwrap();
+
+            let expected = [0., 0., 0., 0., 0., 0., 0., 0., 90., 90., 0., 0.];
+            for iteration in simulation_time_iterator() {
+                assert_eq!(
+                    event_appliance_gains
+                        .total_internal_gain_in_w(zone_area, iteration)
+                        .unwrap(),
+                    expected[iteration.index]
+                );
+            }
+        }
+
+        #[rstest]
+        /// Test that there are partial gains from a partial timestep
+        fn test_single_appliance_half_timestep_after(mut appliance_data: ApplianceGainsDetails) {
+            let zone_area = 10.;
+            let standby = 0.;
+
+            appliance_data.standby.replace(standby);
+            appliance_data.gains_fraction = 1.;
+            appliance_data.events.replace(vec![ApplianceGainsEvent {
+                start: 5.,
+                duration: 2.5,
+                demand_w: 900.,
+            }]);
+
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection(),
+                &simulation_time_iterator(),
+                &appliance_data,
+                total_floor_area(),
+                Some(smart_control().into()),
+            )
+            .unwrap();
+
+            let expected = [0., 0., 0., 0., 0., 90., 90., 45., 0., 0., 0., 0.];
+            for iteration in simulation_time_iterator() {
+                assert_eq!(
+                    event_appliance_gains
+                        .total_internal_gain_in_w(zone_area, iteration)
+                        .unwrap(),
+                    expected[iteration.index]
+                );
+            }
+        }
+
+        #[rstest]
+        /// Test that the gains begin at a whole timestep
+        fn test_single_appliance_half_timestep_before(mut appliance_data: ApplianceGainsDetails) {
+            let zone_area = 10.;
+            let standby = 0.;
+
+            appliance_data.standby.replace(standby);
+            appliance_data.gains_fraction = 1.;
+            appliance_data.events.replace(vec![ApplianceGainsEvent {
+                start: 4.5,
+                duration: 2.,
+                demand_w: 900.,
+            }]);
+
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection(),
+                &simulation_time_iterator(),
+                &appliance_data,
+                total_floor_area(),
+                Some(smart_control().into()),
+            )
+            .unwrap();
+
+            let expected = [0., 0., 0., 0., 45., 90., 45., 0., 0., 0., 0., 0.];
+            for iteration in simulation_time_iterator() {
+                assert_eq!(
+                    event_appliance_gains
+                        .total_internal_gain_in_w(zone_area, iteration)
+                        .unwrap(),
+                    expected[iteration.index]
+                );
+            }
+        }
+
+        #[rstest]
+        /// Test that two appliances at the same time are separated
+        fn test_two_appliances_loadshifted(mut appliance_data: ApplianceGainsDetails) {
+            let zone_area = 10.;
+            let standby = 0.;
+
+            appliance_data.standby.replace(standby);
+            appliance_data.gains_fraction = 1.;
+            appliance_data.events.replace(vec![
+                ApplianceGainsEvent {
+                    start: 5.,
+                    duration: 2.,
+                    demand_w: 900.,
+                },
+                ApplianceGainsEvent {
+                    start: 6.,
+                    duration: 2.,
+                    demand_w: 900.,
+                },
+            ]);
+
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection(),
+                &simulation_time_iterator(),
+                &appliance_data,
+                total_floor_area(),
+                Some(smart_control().into()),
+            )
+            .unwrap();
+
+            let expected = [0., 0., 0., 0., 0., 90., 90., 90., 90., 0., 0., 0.];
+            for iteration in simulation_time_iterator() {
+                assert_eq!(
+                    event_appliance_gains
+                        .total_internal_gain_in_w(zone_area, iteration)
+                        .unwrap(),
+                    expected[iteration.index]
+                );
+            }
+        }
+
+        #[rstest]
+        /// Test that appliances aren't shifted with a max_shift_hrs of 0
+        fn test_two_appliances_not_loadshifted(mut appliance_data: ApplianceGainsDetails) {
+            let zone_area = 10.;
+            let standby = 0.;
+
+            appliance_data.standby.replace(standby);
+            appliance_data.gains_fraction = 1.;
+            if let Some(loadshifting) = appliance_data.load_shifting.as_mut() {
+                loadshifting.max_shift_hrs = 0.;
+            }
+            appliance_data.events.replace(vec![
+                ApplianceGainsEvent {
+                    start: 5.,
+                    duration: 2.,
+                    demand_w: 900.,
+                },
+                ApplianceGainsEvent {
+                    start: 6.,
+                    duration: 2.,
+                    demand_w: 900.,
+                },
+            ]);
+
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection(),
+                &simulation_time_iterator(),
+                &appliance_data,
+                total_floor_area(),
+                Some(smart_control().into()),
+            )
+            .unwrap();
+
+            let expected = [0., 0., 0., 0., 0., 90., 180., 90., 0., 0., 0., 0.];
+            for iteration in simulation_time_iterator() {
+                assert_eq!(
+                    event_appliance_gains
+                        .total_internal_gain_in_w(zone_area, iteration)
+                        .unwrap(),
+                    expected[iteration.index]
+                );
+            }
+        }
+
+        #[rstest]
+        /// Test that appliances are shifted with a max_shift_hrs of 1
+        fn test_two_appliances_loadshifted_one_hour(mut appliance_data: ApplianceGainsDetails) {
+            let zone_area = 10.;
+            let standby = 0.;
+
+            appliance_data.standby.replace(standby);
+            appliance_data.gains_fraction = 1.;
+            if let Some(loadshifting) = appliance_data.load_shifting.as_mut() {
+                loadshifting.max_shift_hrs = 1.;
+            }
+            appliance_data.events.replace(vec![
+                ApplianceGainsEvent {
+                    start: 5.,
+                    duration: 3.,
+                    demand_w: 900.,
+                },
+                ApplianceGainsEvent {
+                    start: 6.,
+                    duration: 3.,
+                    demand_w: 900.,
+                },
+            ]);
+
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection(),
+                &simulation_time_iterator(),
+                &appliance_data,
+                total_floor_area(),
+                Some(smart_control().into()),
+            )
+            .unwrap();
+
+            let expected = [0., 0., 0., 0., 0., 90., 180., 180., 90., 0., 0., 0.];
+            for iteration in simulation_time_iterator() {
+                assert_eq!(
+                    event_appliance_gains
+                        .total_internal_gain_in_w(zone_area, iteration)
+                        .unwrap(),
+                    expected[iteration.index]
+                );
+            }
+        }
+
+        #[rstest]
+        /// Test that appliances are shifted with a max_shift_hrs of 2
+        fn test_two_appliances_loadshifted_two_hours(mut appliance_data: ApplianceGainsDetails) {
+            let zone_area = 10.;
+            let standby = 0.;
+
+            appliance_data.standby.replace(standby);
+            appliance_data.gains_fraction = 1.;
+            if let Some(loadshifting) = appliance_data.load_shifting.as_mut() {
+                loadshifting.max_shift_hrs = 2.;
+            }
+            appliance_data.events.replace(vec![
+                ApplianceGainsEvent {
+                    start: 5.,
+                    duration: 3.,
+                    demand_w: 900.,
+                },
+                ApplianceGainsEvent {
+                    start: 6.,
+                    duration: 3.,
+                    demand_w: 900.,
+                },
+            ]);
+
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection(),
+                &simulation_time_iterator(),
+                &appliance_data,
+                total_floor_area(),
+                Some(smart_control().into()),
+            )
+            .unwrap();
+
+            let expected = [0., 0., 0., 0., 0., 90., 90., 90., 90., 90., 90., 0.];
+            for iteration in simulation_time_iterator() {
+                assert_eq!(
+                    event_appliance_gains
+                        .total_internal_gain_in_w(zone_area, iteration)
+                        .unwrap(),
+                    expected[iteration.index]
+                );
+            }
+        }
+
+        #[rstest]
+        /// Test that no load shifting occurs when loadshifting isn't set
+        fn test_loadshifting_disabled(mut appliance_data: ApplianceGainsDetails) {
+            let zone_area = 10.;
+            let standby = 0.;
+
+            appliance_data.standby.replace(standby);
+            appliance_data.gains_fraction = 1.;
+            appliance_data.load_shifting = None;
+            appliance_data.events.replace(vec![
+                ApplianceGainsEvent {
+                    start: 5.,
+                    duration: 2.,
+                    demand_w: 900.,
+                },
+                ApplianceGainsEvent {
+                    start: 6.,
+                    duration: 2.,
+                    demand_w: 900.,
+                },
+            ]);
+
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection(),
+                &simulation_time_iterator(),
+                &appliance_data,
+                total_floor_area(),
+                Some(smart_control().into()),
+            )
+            .unwrap();
+
+            let expected = [0., 0., 0., 0., 0., 90., 180., 90., 0., 0., 0., 0.];
+            for iteration in simulation_time_iterator() {
+                assert_eq!(
+                    event_appliance_gains
+                        .total_internal_gain_in_w(zone_area, iteration)
+                        .unwrap(),
+                    expected[iteration.index]
+                );
+            }
+        }
+
+        #[rstest]
+        /// Test that gains past the end of the simulation are assigned to the last timestep
+        fn test_past_end_of_simulation(mut appliance_data: ApplianceGainsDetails) {
+            let zone_area = 10.;
+            let standby = 0.;
+
+            appliance_data.standby.replace(standby);
+            appliance_data.gains_fraction = 1.;
+            if let Some(loadshifting) = appliance_data.load_shifting.as_mut() {
+                loadshifting.max_shift_hrs = 1.;
+            }
+            appliance_data.events.replace(vec![ApplianceGainsEvent {
+                start: 8.,
+                duration: 5.,
+                demand_w: 100.,
+            }]);
+
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection(),
+                &simulation_time_iterator(),
+                &appliance_data,
+                total_floor_area(),
+                Some(smart_control().into()),
+            )
+            .unwrap();
+
+            let expected = [0., 0., 0., 0., 0., 0., 0., 0., 10., 10., 10., 20.];
+            for iteration in simulation_time_iterator() {
+                assert_eq!(
+                    event_appliance_gains
+                        .total_internal_gain_in_w(zone_area, iteration)
+                        .unwrap(),
+                    expected[iteration.index]
+                );
+            }
+        }
+
+        #[rstest]
+        /// Test that load shifting occurs with a demand_limit_weighted set
+        fn test_demand_limit(mut appliance_data: ApplianceGainsDetails) {
+            let zone_area = 10.;
+            let standby = 0.;
+
+            appliance_data.standby.replace(standby);
+            appliance_data.gains_fraction = 1.;
+            if let Some(loadshifting) = appliance_data.load_shifting.as_mut() {
+                loadshifting.demand_limit_weighted = 1000.;
+                loadshifting.max_shift_hrs = 10.;
+            }
+            appliance_data.events.replace(vec![
+                ApplianceGainsEvent {
+                    start: 5.,
+                    duration: 2.,
+                    demand_w: 900.,
+                },
+                ApplianceGainsEvent {
+                    start: 6.,
+                    duration: 2.,
+                    demand_w: 900.,
+                },
+            ]);
+
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection(),
+                &simulation_time_iterator(),
+                &appliance_data,
+                total_floor_area(),
+                Some(smart_control().into()),
+            )
+            .unwrap();
+
+            let expected = [0., 0., 0., 0., 0., 90., 90., 90., 90., 0., 0., 0.];
+            for iteration in simulation_time_iterator() {
+                assert_eq!(
+                    event_appliance_gains
+                        .total_internal_gain_in_w(zone_area, iteration)
+                        .unwrap(),
+                    expected[iteration.index]
+                );
+            }
+        }
+
+        #[rstest]
+        /// Test that load shifting occurs with the larger demand first
+        fn test_demand_limit_with_larger_event_first(mut appliance_data: ApplianceGainsDetails) {
+            let zone_area = 10.;
+            let standby = 0.;
+
+            appliance_data.standby.replace(standby);
+            appliance_data.gains_fraction = 1.;
+            if let Some(loadshifting) = appliance_data.load_shifting.as_mut() {
+                loadshifting.demand_limit_weighted = 1000.;
+                loadshifting.max_shift_hrs = 10.;
+            }
+            appliance_data.events.replace(vec![
+                ApplianceGainsEvent {
+                    start: 5.,
+                    duration: 2.,
+                    demand_w: 900.,
+                },
+                ApplianceGainsEvent {
+                    start: 6.,
+                    duration: 2.,
+                    demand_w: 800.,
+                },
+            ]);
+
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection(),
+                &simulation_time_iterator(),
+                &appliance_data,
+                total_floor_area(),
+                Some(smart_control().into()),
+            )
+            .unwrap();
+
+            let expected = [0., 0., 0., 0., 0., 90., 90., 80., 80., 0., 0., 0.];
+            for iteration in simulation_time_iterator() {
+                assert_eq!(
+                    event_appliance_gains
+                        .total_internal_gain_in_w(zone_area, iteration)
+                        .unwrap(),
+                    expected[iteration.index]
+                );
+            }
+        }
+
+        #[rstest]
+        /// Test that load shifting does not occur with the smaller demand first
+        fn test_demand_limit_with_larger_event_last(mut appliance_data: ApplianceGainsDetails) {
+            let zone_area = 10.;
+            let standby = 0.;
+
+            appliance_data.standby.replace(standby);
+            appliance_data.gains_fraction = 1.;
+            if let Some(loadshifting) = appliance_data.load_shifting.as_mut() {
+                loadshifting.demand_limit_weighted = 1000.;
+                loadshifting.max_shift_hrs = 10.;
+            }
+            appliance_data.events.replace(vec![
+                ApplianceGainsEvent {
+                    start: 5.,
+                    duration: 2.,
+                    demand_w: 800.,
+                },
+                ApplianceGainsEvent {
+                    start: 6.,
+                    duration: 2.,
+                    demand_w: 900.,
+                },
+            ]);
+
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection(),
+                &simulation_time_iterator(),
+                &appliance_data,
+                total_floor_area(),
+                Some(smart_control().into()),
+            )
+            .unwrap();
+
+            let expected = [0., 0., 0., 0., 0., 80., 170., 90., 0., 0., 0., 0.];
+            for iteration in simulation_time_iterator() {
+                assert_eq!(
+                    event_appliance_gains
+                        .total_internal_gain_in_w(zone_area, iteration)
+                        .unwrap(),
+                    expected[iteration.index]
+                );
+            }
+        }
+
+        #[rstest]
+        /// Test that the load shifting does not occur with a large demand_limit_weighted
+        fn test_large_demand_limit(mut appliance_data: ApplianceGainsDetails) {
+            let zone_area = 10.;
+            let standby = 0.;
+
+            appliance_data.standby.replace(standby);
+            appliance_data.gains_fraction = 1.;
+            if let Some(loadshifting) = appliance_data.load_shifting.as_mut() {
+                loadshifting.demand_limit_weighted = 20000.;
+                loadshifting.max_shift_hrs = 10.;
+            }
+            appliance_data.events.replace(vec![
+                ApplianceGainsEvent {
+                    start: 5.,
+                    duration: 2.,
+                    demand_w: 900.,
+                },
+                ApplianceGainsEvent {
+                    start: 6.,
+                    duration: 2.,
+                    demand_w: 800.,
+                },
+            ]);
+
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection(),
+                &simulation_time_iterator(),
+                &appliance_data,
+                total_floor_area(),
+                Some(smart_control().into()),
+            )
+            .unwrap();
+
+            let expected = [0., 0., 0., 0., 0., 90., 170., 80., 0., 0., 0., 0.];
+            for iteration in simulation_time_iterator() {
+                assert_eq!(
+                    event_appliance_gains
+                        .total_internal_gain_in_w(zone_area, iteration)
+                        .unwrap(),
+                    expected[iteration.index]
+                );
+            }
+        }
+
+        #[rstest]
+        /// Test that the load shifting does not occur with negative weight_timeseries
+        fn test_negative_weights(mut appliance_data: ApplianceGainsDetails) {
+            let zone_area = 10.;
+            let standby = 0.;
+
+            appliance_data.standby.replace(standby);
+            appliance_data.gains_fraction = 1.;
+            if let Some(loadshifting) = appliance_data.load_shifting.as_mut() {
+                loadshifting.demand_limit_weighted = -100.;
+                loadshifting.max_shift_hrs = 10.;
+                loadshifting.weight_timeseries = vec![-1.; 12];
+            }
+            appliance_data.events.replace(vec![
+                ApplianceGainsEvent {
+                    start: 5.,
+                    duration: 2.,
+                    demand_w: 900.,
+                },
+                ApplianceGainsEvent {
+                    start: 6.,
+                    duration: 2.,
+                    demand_w: 800.,
+                },
+            ]);
+
+            let event_appliance_gains = EventApplianceGains::new(
+                energy_supply_connection(),
+                &simulation_time_iterator(),
+                &appliance_data,
+                total_floor_area(),
+                Some(smart_control().into()),
+            )
+            .unwrap();
+
+            let expected = [0., 0., 0., 0., 0., 90., 170., 80., 0., 0., 0., 0.];
+            for iteration in simulation_time_iterator() {
+                assert_eq!(
+                    event_appliance_gains
+                        .total_internal_gain_in_w(zone_area, iteration)
+                        .unwrap(),
+                    expected[iteration.index]
+                );
+            }
+        }
+    }
+}
