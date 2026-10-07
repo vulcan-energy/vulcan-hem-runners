@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "sourceCommit": "ece8ad98f126f9f03aafbf4a1d63b267ab730d43",
-  "sourceTreeSha256": "934effc7224bbe3b0c4e9645b62ca708b9c843d80f7bbc4097e5a5554fe05b68",
+  "sourceCommit": "3d3610b27d8770e718809aad145ea8b0f150131c",
+  "sourceTreeSha256": "c4e76ee8da54259afd6da5b584b881afad890f3400bcbece4569ca401ff246d2",
   "sourceTreeDirty": true,
-  "originGitTree": "a4a5e36ceb69b46ad790f1d79fdbbd631bcd2a8f",
-  "originWorkingTreeDirty": true,
-  "exportFilesSha256": "934effc7224bbe3b0c4e9645b62ca708b9c843d80f7bbc4097e5a5554fe05b68",
+  "originGitTree": "bacc2c0cfb066e9b8573dea70cac8603a8ee23e8",
+  "originWorkingTreeDirty": false,
+  "exportFilesSha256": "c4e76ee8da54259afd6da5b584b881afad890f3400bcbece4569ca401ff246d2",
   "files": [
     {
       "path": ".cargo/config.toml",
@@ -17,7 +17,7 @@
     },
     {
       "path": "ATTRIBUTION.md",
-      "sha256": "cc0c72541a2cd0def4c1d82341822c7a16e898dfe188bd6b9bc7153d196d51f3"
+      "sha256": "500a1d96e6f6348b6c299c20e0f52cfe0782da84469ae8c4b99cb8c527fef29a"
     },
     {
       "path": "FHS-MIT-LICENSE.md",
@@ -29,11 +29,11 @@
     },
     {
       "path": "NOTICE.md",
-      "sha256": "7217c63280f5cc3e37bc4ad4ab4bb94f37bd68167589c3b2b3d1578049b2eb91"
+      "sha256": "aa3b37fd8951057f36753efe7e0981cc2d41348a70e340044b6f42c3a37172b1"
     },
     {
       "path": "README.md",
-      "sha256": "b12e998eccafaf2b512ac186922557f9f8139048940ae4bd63e4d1371906e497"
+      "sha256": "28ff06ed978fc5ee04340e3f9a694749ca339116caad84ed0009cb9db606b6ce"
     },
     {
       "path": "TRADEMARKS.md",
@@ -185,7 +185,7 @@
     },
     {
       "path": "hem-target-core/src/target_scenario.rs",
-      "sha256": "8910f918653615b2a6d863fc8c32163c3e8019d1a8282991834f976430b7339b"
+      "sha256": "a7af8bfc03cff7a0c280dea24c61c6867ba53840c9b2cc4565eada4c7f62b4c9"
     },
     {
       "path": "hem_engine_upstream/.github/dependabot.yml",
@@ -5785,11 +5785,11 @@
     },
     {
       "path": "scripts/hem-targets/__tests__/export-runner-sources.test.mjs",
-      "sha256": "54d41e1ddf897f7cd31d16c7cc38600f34dbf2bdce232c0ea709cde378df18be"
+      "sha256": "d246d3b28aa49400bb0decf90b88933dcda43ca05ff1d872c0885c9bf764b66e"
     },
     {
       "path": "scripts/hem-targets/export-runner-sources.mjs",
-      "sha256": "6c9a8bea38c9a3cf881d611b5c80a1e4f7916fab40a3e33a0af9e92941afe615"
+      "sha256": "3f115c9f2b43803133ff61be8fa8436846ab964b359c5434d1f543b1f899a2b9"
     },
     {
       "path": "scripts/hem-targets/licensing/ADDITIONAL_TERMS.md",
@@ -5797,7 +5797,7 @@
     },
     {
       "path": "scripts/hem-targets/licensing/ATTRIBUTION.md",
-      "sha256": "cc0c72541a2cd0def4c1d82341822c7a16e898dfe188bd6b9bc7153d196d51f3"
+      "sha256": "500a1d96e6f6348b6c299c20e0f52cfe0782da84469ae8c4b99cb8c527fef29a"
     },
     {
       "path": "scripts/hem-targets/licensing/LICENSE",
@@ -5805,7 +5805,7 @@
     },
     {
       "path": "scripts/hem-targets/licensing/NOTICE.md",
-      "sha256": "7217c63280f5cc3e37bc4ad4ab4bb94f37bd68167589c3b2b3d1578049b2eb91"
+      "sha256": "aa3b37fd8951057f36753efe7e0981cc2d41348a70e340044b6f42c3a37172b1"
     },
     {
       "path": "scripts/hem-targets/licensing/TRADEMARKS.md",
@@ -5813,7 +5813,7 @@
     },
     {
       "path": "scripts/hem-targets/licensing/runtime-header.js",
-      "sha256": "eaff1311ee7ceaef6ed333b7a46d42ef6666718e67c342635bee7d1acc57feda"
+      "sha256": "bd206d03bbc398f8c688166e7e4561d7d05ed0d18d75e7078a183e745a2362c6"
     },
     {
       "path": "scripts/hem-targets/licensing/third-party/FHS-MIT.md",
@@ -6232,7 +6232,7 @@
     "hemEngine": "62d3df705690f33b3fc3e905c9971d4f3743bf2e",
     "hemFhs": "c5ba2673fbd886cfe4fb528f61b376bdf406ebbd",
     "community": {
-      "head": "2c54149b9251770622badf07b97563e7fba842d4",
+      "head": "e553eac1b83d46994b9cb8989c25a97c412cc73c",
       "workingTreeDirty": false,
       "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     }

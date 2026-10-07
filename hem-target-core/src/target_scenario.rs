@@ -728,64 +728,6 @@ pub fn merge_model(base_model: &mut Value, category: &str, params: &Value) -> Re
                     base_model_obj.insert("HeatSourceWet".to_string(), param_heat_source.clone());
                 }
             }
-
-            // Update system references to use the new heat sources
-            if let Some(heat_source_names) = params
-                .get("HeatSourceWet")
-                .and_then(|hs| hs.as_object())
-                .map(|hs| hs.keys().cloned().collect::<Vec<_>>())
-            {
-                if let Some(first_heat_source) = heat_source_names.first() {
-                    // Update SpaceHeatSystem.HeatSource.name references
-                    if let Some(space_heat_systems) = base_model.get_mut("SpaceHeatSystem") {
-                        if let Some(systems_obj) = space_heat_systems.as_object_mut() {
-                            for system in systems_obj.values_mut() {
-                                if let Some(system_obj) = system.as_object_mut() {
-                                    if let Some(heat_source) = system_obj.get_mut("HeatSource") {
-                                        if let Some(heat_source_obj) = heat_source.as_object_mut() {
-                                            heat_source_obj.insert(
-                                                "name".to_string(),
-                                                serde_json::Value::String(
-                                                    first_heat_source.clone(),
-                                                ),
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Update HotWaterSource.HeatSource references - FIXED: Use the new heat source name
-                    if let Some(hot_water_source) = base_model.get_mut("HotWaterSource") {
-                        if let Some(hw_source_obj) = hot_water_source.as_object_mut() {
-                            for hw_source in hw_source_obj.values_mut() {
-                                if let Some(hw_source_obj) = hw_source.as_object_mut() {
-                                    if let Some(heat_source) = hw_source_obj.get_mut("HeatSource") {
-                                        if let Some(heat_source_obj) = heat_source.as_object_mut() {
-                                            // Clear existing heat sources and add the new one
-                                            heat_source_obj.clear();
-                                            heat_source_obj.insert(
-                                                first_heat_source.clone(),
-                                                serde_json::json!({
-                                                    "type": "HeatSourceWet",
-                                                    "name": first_heat_source,
-                                                    "temp_flow_limit_upper": 65,
-                                                    "EnergySupply": "mains elec",
-                                                    "Controlmin": "HotWaterMin",
-                                                    "Controlmax": "HotWaterMax",
-                                                    "heater_position": 0.1,
-                                                    "thermostat_position": 0.33
-                                                }),
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         }
         "space_cooling_systems" => {
             if let Some(param_cooling) = params.get("SpaceCoolSystem").and_then(Value::as_object) {
@@ -837,6 +779,64 @@ pub fn merge_model(base_model: &mut Value, category: &str, params: &Value) -> Re
         }
         _ => {
             // For now, we do nothing for other categories
+        }
+    }
+    // Either snippet may arrive last. Only repair references when there is one
+    // unambiguous plant; independent cylinder heaters are never replaced.
+    if matches!(category, "heat_source_wet" | "hot_water_source") {
+        let plant = base_model
+            .get("HeatSourceWet")
+            .and_then(Value::as_object)
+            .filter(|plants| plants.len() == 1)
+            .and_then(|plants| plants.keys().next())
+            .cloned();
+        if let Some(plant) = plant {
+            if category == "heat_source_wet" {
+                let air_sink = base_model["HeatSourceWet"][&plant]["sink_type"] == "Air";
+                if let Some(systems) = base_model
+                    .get_mut("SpaceHeatSystem")
+                    .and_then(Value::as_object_mut)
+                {
+                    for system in systems.values_mut() {
+                        // WarmAir may follow an air-to-air replacement, never water plant.
+                        if system.get("type").and_then(Value::as_str) == Some("WarmAir") && !air_sink {
+                            continue;
+                        }
+                        if let Some(source) =
+                            system.get_mut("HeatSource").and_then(Value::as_object_mut)
+                        {
+                            source.insert("name".into(), Value::String(plant.clone()));
+                        }
+                    }
+                }
+            }
+            if let Some(cylinders) = base_model
+                .get_mut("HotWaterSource")
+                .and_then(Value::as_object_mut)
+            {
+                for cylinder in cylinders.values_mut() {
+                    match cylinder.get("type").and_then(Value::as_str) {
+                        Some("CombiBoiler" | "HIU" | "HeatBattery") => {
+                            cylinder["HeatSourceWet"] = Value::String(plant.clone());
+                        }
+                        Some("StorageTank" | "SmartHotWaterTank") => {
+                            if let Some(sources) = cylinder
+                                .get_mut("HeatSource")
+                                .and_then(Value::as_object_mut)
+                            {
+                                for source in sources.values_mut() {
+                                    if source.get("type").and_then(Value::as_str)
+                                        == Some("HeatSourceWet")
+                                    {
+                                        source["name"] = Value::String(plant.clone());
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
         }
     }
     Ok(())

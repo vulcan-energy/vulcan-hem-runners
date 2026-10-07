@@ -99,10 +99,11 @@ test('runner extracted source declares the owner-approved licence and Origin Ter
   assert.equal(runnerTrademarks, communityTrademarks);
   assert.match(notice, /owner approved these terms on 2026-10-06/);
   const attribution = await read('scripts/hem-targets/licensing/ATTRIBUTION.md');
-  const releaseUrl = 'https://github.com/vulcan-energy/vulcan-hem-runners/tree/hem-fhs-mvp-2026-10-07';
+  const releaseUrl = 'https://github.com/vulcan-energy/vulcan-hem-runners/tree/hem-fhs-preparation-2026-10-07';
   assert.match(notice, new RegExp(releaseUrl.replaceAll('.', '\\.'), 'u'));
   assert.match(attribution, new RegExp(releaseUrl.replaceAll('.', '\\.'), 'u'));
-  const releaseAssetsUrl = 'https://github.com/vulcan-energy/vulcan-hem-runners/releases/tag/hem-fhs-mvp-2026-10-07';
+  assert.ok((await read('scripts/hem-targets/licensing/runtime-header.js')).includes(releaseUrl), 'runtime header links its exact corresponding source');
+  const releaseAssetsUrl = 'https://github.com/vulcan-energy/vulcan-hem-runners/releases/tag/hem-fhs-preparation-2026-10-07';
   assert.match(notice, new RegExp(releaseAssetsUrl.replaceAll('.', '\\.'), 'u'));
   assert.match(attribution, new RegExp(releaseAssetsUrl.replaceAll('.', '\\.'), 'u'));
   assert.doesNotMatch(`${notice}\n${attribution}`, /private and has not been released|private-candidate|before any release, replace/i);
@@ -125,7 +126,7 @@ test('runner extracted source declares the owner-approved licence and Origin Ter
     assert.match(source, /Vulcan Origin Terms v1\.0/, relative);
   }
   const exporter = await read('scripts/hem-targets/export-runner-sources.mjs');
-  assert.ok(exporter.includes('releases/tag/hem-fhs-mvp-2026-10-07'), 'generated README links the full release source/build archives');
+  assert.ok(exporter.includes('releases/tag/hem-fhs-preparation-2026-10-07'), 'generated README links the full release source/build archives');
   assert.doesNotMatch(exporter, /private source candidate|private, review-only export/);
   assert.match(exporter, /scripts\/hem-targets\/patch-wasm-rayon-worker-helper\.mjs/);
   assert.match(exporter, /Preserved original file bytes and shebang/);
