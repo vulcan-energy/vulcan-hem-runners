@@ -99,11 +99,11 @@ test('runner extracted source declares the owner-approved licence and Origin Ter
   assert.equal(runnerTrademarks, communityTrademarks);
   assert.match(notice, /owner approved these terms on 2026-10-06/);
   const attribution = await read('scripts/hem-targets/licensing/ATTRIBUTION.md');
-  const releaseUrl = 'https://github.com/vulcan-energy/vulcan-hem-runners/tree/hem-fhs-preparation-2026-10-07';
+  const releaseUrl = 'https://github.com/vulcan-energy/vulcan-hem-runners/tree/hem-fhs-preparation-2026-10-08';
   assert.match(notice, new RegExp(releaseUrl.replaceAll('.', '\\.'), 'u'));
   assert.match(attribution, new RegExp(releaseUrl.replaceAll('.', '\\.'), 'u'));
   assert.ok((await read('scripts/hem-targets/licensing/runtime-header.js')).includes(releaseUrl), 'runtime header links its exact corresponding source');
-  const releaseAssetsUrl = 'https://github.com/vulcan-energy/vulcan-hem-runners/releases/tag/hem-fhs-preparation-2026-10-07';
+  const releaseAssetsUrl = 'https://github.com/vulcan-energy/vulcan-hem-runners/releases/tag/hem-fhs-preparation-2026-10-08';
   assert.match(notice, new RegExp(releaseAssetsUrl.replaceAll('.', '\\.'), 'u'));
   assert.match(attribution, new RegExp(releaseAssetsUrl.replaceAll('.', '\\.'), 'u'));
   assert.doesNotMatch(`${notice}\n${attribution}`, /private and has not been released|private-candidate|before any release, replace/i);
@@ -125,8 +125,17 @@ test('runner extracted source declares the owner-approved licence and Origin Ter
     assert.match(source, /SPDX-License-Identifier: AGPL-3\.0-only/, relative);
     assert.match(source, /Vulcan Origin Terms v1\.0/, relative);
   }
+  // Every TypeScript runtime source ships in the export, so every one carries the header
+  // (its package.json, which cannot hold comments, states the licence as a field).
+  assert.equal(JSON.parse(await read('hem-target-runtime/package.json')).license, 'AGPL-3.0-only');
+  const runtimeFiles = (await fs.readdir(path.join(root, 'hem-target-runtime'), { recursive: true, withFileTypes: true }))
+    .filter(entry => entry.isFile() && entry.name.endsWith('.ts')).map(entry => path.relative(root, path.join(entry.parentPath, entry.name)));
+  assert.ok(runtimeFiles.length > 0, 'hem-target-runtime has files');
+  for (const relative of runtimeFiles) {
+    assert.match(await read(relative), /^\/\/ SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors\n\/\/ SPDX-License-Identifier: AGPL-3\.0-only\n\/\/ This file is subject to Vulcan Origin Terms v1\.0;/, relative);
+  }
   const exporter = await read('scripts/hem-targets/export-runner-sources.mjs');
-  assert.ok(exporter.includes('releases/tag/hem-fhs-preparation-2026-10-07'), 'generated README links the full release source/build archives');
+  assert.ok(exporter.includes('releases/tag/hem-fhs-preparation-2026-10-08'), 'generated README links the full release source/build archives');
   assert.doesNotMatch(exporter, /private source candidate|private, review-only export/);
   assert.match(exporter, /scripts\/hem-targets\/patch-wasm-rayon-worker-helper\.mjs/);
   assert.match(exporter, /Preserved original file bytes and shebang/);

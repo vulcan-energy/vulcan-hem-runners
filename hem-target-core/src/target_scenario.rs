@@ -1077,6 +1077,7 @@ pub fn prepare_target_scenario(
             .extend(vulcan_model_transform::validate_target_input(
                 &output.model,
                 conversion_profile,
+                &output.version_metadata,
             ));
         output.validation.is_valid = output.validation.errors.is_empty();
     }
@@ -1094,18 +1095,29 @@ pub fn prepare_effective_scenario(
     }
     let mut candidate = output.model.clone();
     for (category, snippet) in snippets {
+        // No FHS target schema accepts what these merges write, or the wrapper
+        // overwrites it, so they would fail obscurely or silently change nothing.
+        let unsupported = match category.as_str() {
+            "lighting" => Some("FHS takes lighting from each zone's bulbs; edit them in the model"),
+            "tariff" => Some("FHS input has no tariff"),
+            "internal_gains" => Some("FHS derives internal gains itself"),
+            "controls" => Some("FHS sets heating and hot-water controls itself"),
+            "glazing" => Some("FHS windows take width and height, not a scaled area; edit the windows in the model"),
+            _ => None,
+        };
+        if let Some(reason) = unsupported {
+            return Err(PipelineError::InvalidRequest(format!(
+                "Scenario category '{category}' is not supported by HEM FHS targets: {reason}."
+            )));
+        }
         if !matches!(
             category.as_str(),
             "orientation"
-                | "glazing"
                 | "location"
                 | "airtightness"
                 | "space_heat_emitters"
                 | "space_heat_systems"
-                | "controls"
                 | "hot_water_source"
-                | "tariff"
-                | "internal_gains"
                 | "events"
                 | "solar_systems"
                 | "battery_systems"
@@ -1113,7 +1125,6 @@ pub fn prepare_effective_scenario(
                 | "simplified_fabric"
                 | "heat_source_wet"
                 | "space_cooling_systems"
-                | "lighting"
                 | "compliance_settings"
         ) {
             return Err(PipelineError::InvalidRequest(format!("Scenario category '{category}' is not supported by target preparation; execution flags and weather must be resolved by the host.")));
@@ -1152,14 +1163,19 @@ pub fn prepare_effective_scenario(
             "Scenario fields are incompatible with the selected target schema: {paths}. Update the snippet for this target; no partial scenario was applied."
         )));
     }
-    output.model = finalized.model;
-    // Merge/schema errors are recomputed; source parsing/mapping errors remain actionable.
+    // Merge/schema errors are recomputed; source parsing/mapping errors remain
+    // actionable unless a snippet authored the very value the source lacked.
     let mut errors = output
         .validation
         .errors
         .into_iter()
         .filter(|e| e.keyword.is_none())
+        .filter(|e| {
+            e.code != "E_TARGET_INPUT"
+                || output.model.pointer(&e.path) == finalized.model.pointer(&e.path)
+        })
         .collect::<Vec<_>>();
+    output.model = finalized.model;
     errors.extend(finalized.validation.errors);
     output.validation = ValidationResult {
         is_valid: errors.is_empty(),

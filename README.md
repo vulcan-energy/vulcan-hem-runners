@@ -1,14 +1,14 @@
 # Vulcan HEM FHS runners
 
-Corresponding Source: [source tree at hem-fhs-preparation-2026-10-07](https://github.com/vulcan-energy/vulcan-hem-runners/tree/hem-fhs-preparation-2026-10-07). The complete source and build-material archives are linked from the [matching GitHub release](https://github.com/vulcan-energy/vulcan-hem-runners/releases/tag/hem-fhs-preparation-2026-10-07).
+Corresponding Source: [source tree at hem-fhs-preparation-2026-10-08](https://github.com/vulcan-energy/vulcan-hem-runners/tree/hem-fhs-preparation-2026-10-08). The complete source and build-material archives are linked from the [matching GitHub release](https://github.com/vulcan-energy/vulcan-hem-runners/releases/tag/hem-fhs-preparation-2026-10-08).
 
 This repository contains the narrow FHS target runner source closure for that release.
 
 ## Scope
 
-The release contains the shared `hem-target-core` and thin `hem_target_wrapper`, pristine pinned HEM and FHS upstream trees, the Community `vulcan-model-transform` and `vulcan-csv-codec` crates with their schema/default inputs and notices, and the offline-patched `jsonschema` dependency. It excludes the private Vulcan SAP/PV integration in `hem-batch-core`, `wasm_wrapper` Rust sources, and generic Free editor code. The pinned upstream model sources remain included as runner dependencies.
+The release contains the shared `hem-target-core` and thin `hem_target_wrapper`, the `hem-target-runtime` TypeScript host and workers that prepare models and drive the runners in a browser or CLI, pristine pinned HEM and FHS upstream trees, the Community `vulcan-model-transform` and `vulcan-csv-codec` crates with their schema/default inputs and notices, and the offline-patched `jsonschema` dependency. It excludes the private Vulcan SAP/PV integration in `hem-batch-core`, `wasm_wrapper` Rust sources, and generic Free editor code; `hem-target-runtime` imports the Community geometry-editor packages and the `@repo/core` scenario helpers by name, and those are not part of this closure. The pinned upstream model sources remain included as runner dependencies.
 
-The newly extracted first-party core, wrapper and runner build helpers are licensed under AGPL-3.0-only, supplemented by Vulcan Origin Terms v1.0. The owner approved this scope on 2026-10-06. See `LICENSE`, `ADDITIONAL_TERMS.md`, `NOTICE.md`, `ATTRIBUTION.md` `TRADEMARKS.md`, and `FHS-MIT-LICENSE.md`. The unchanged proprietary root licence from the source repository is not included. The first-party licence grant is separate from the Community transform's own AGPL-3.0-only and Origin Terms.
+The newly extracted first-party core, wrapper, TypeScript runtime and runner build helpers are licensed under AGPL-3.0-only, supplemented by Vulcan Origin Terms v1.0. The owner approved this scope on 2026-10-06. See `LICENSE`, `ADDITIONAL_TERMS.md`, `NOTICE.md`, `ATTRIBUTION.md` `TRADEMARKS.md`, and `FHS-MIT-LICENSE.md`. The unchanged proprietary root licence from the source repository is not included. The first-party licence grant is separate from the Community transform's own AGPL-3.0-only and Origin Terms.
 
 The Community, upstream and vendored notices remain with their respective source trees. The approved FHS MIT authority remains the pinned Community decision for `c5ba2673fbd886cfe4fb528f61b376bdf406ebbd`, with canonical evidence revision `dd5ba73a19674d631da59b4924bb7dc2833fbb3b`.
 

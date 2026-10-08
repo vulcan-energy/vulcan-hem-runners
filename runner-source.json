@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "sourceCommit": "3d3610b27d8770e718809aad145ea8b0f150131c",
-  "sourceTreeSha256": "c4e76ee8da54259afd6da5b584b881afad890f3400bcbece4569ca401ff246d2",
+  "sourceCommit": "d6db53ce72cabe65f95938527221ef0750d4baf0",
+  "sourceTreeSha256": "1a54c84e94765c4f2d218e3dde41a3b13c61724089fc178f9f7464dfd7128d38",
   "sourceTreeDirty": true,
-  "originGitTree": "bacc2c0cfb066e9b8573dea70cac8603a8ee23e8",
+  "originGitTree": "7e46c6b6b76a7eae1c7b702d6c58ab81edbc6aa1",
   "originWorkingTreeDirty": false,
-  "exportFilesSha256": "c4e76ee8da54259afd6da5b584b881afad890f3400bcbece4569ca401ff246d2",
+  "exportFilesSha256": "1a54c84e94765c4f2d218e3dde41a3b13c61724089fc178f9f7464dfd7128d38",
   "files": [
     {
       "path": ".cargo/config.toml",
@@ -17,7 +17,7 @@
     },
     {
       "path": "ATTRIBUTION.md",
-      "sha256": "500a1d96e6f6348b6c299c20e0f52cfe0782da84469ae8c4b99cb8c527fef29a"
+      "sha256": "3215a54d12a67e885ff2060c063895c704122b723afc0a2052f1d7c44e32e06e"
     },
     {
       "path": "FHS-MIT-LICENSE.md",
@@ -29,11 +29,11 @@
     },
     {
       "path": "NOTICE.md",
-      "sha256": "aa3b37fd8951057f36753efe7e0981cc2d41348a70e340044b6f42c3a37172b1"
+      "sha256": "7dca23d70dd76f6a5d9bc85ccb5aebb22aae3bb42be4c3472c1cca3722210e72"
     },
     {
       "path": "README.md",
-      "sha256": "28ff06ed978fc5ee04340e3f9a694749ca339116caad84ed0009cb9db606b6ce"
+      "sha256": "f8762913941d62a3b335e2d611661a55b269de9371f8ca54cb8aabd3b1f782d4"
     },
     {
       "path": "TRADEMARKS.md",
@@ -101,15 +101,15 @@
     },
     {
       "path": "community/crates/vulcan-model-transform/src/builder.rs",
-      "sha256": "9f4b68b043c6ad8049a25cf4053918c19c57f041d68619b336d15837e353ce51"
+      "sha256": "de8eeb22c2ca2f21948920f8e05cec46b9e28e6690777daba9c0eee1a5cf0ba1"
     },
     {
       "path": "community/crates/vulcan-model-transform/src/finalization.rs",
-      "sha256": "28a332eaf8071ee498e2fcf433e8786604f381a2ce1cb0ff5e0971e7e3d1ba30"
+      "sha256": "6165c5958da85920e8e9218ae500928cae52bc9a1391a02b5e2625b95020fb89"
     },
     {
       "path": "community/crates/vulcan-model-transform/src/lib.rs",
-      "sha256": "76bd03cf9d2f4a0a29f3f764a2e0b30d66e0cff9d55d3c14015aa209f50308e6"
+      "sha256": "f425739bf7ba437d82b52c5e0d596a95e4ae9dbb429aa7ceda989d6b6e3eff99"
     },
     {
       "path": "community/crates/vulcan-model-transform/src/preflight_diagnostics.rs",
@@ -121,11 +121,11 @@
     },
     {
       "path": "community/crates/vulcan-model-transform/src/target_mappings.rs",
-      "sha256": "d78ecf72c4d5efde679b0cb646ca5e67fa71bdf7ce29045e4467622d3541feee"
+      "sha256": "4a0752463197a872be3a17ee87120c367519fc2cc066ad48a6482cc67840ed34"
     },
     {
       "path": "community/crates/vulcan-model-transform/tests/explicit_inputs.rs",
-      "sha256": "df5c155e6c30f8a54c46f538a1c8d28fab041b60fae6b6be5611e81903774161"
+      "sha256": "e1706719840265d6f6834a0811b2f4c007f0cdeb924f4e66c183570038656274"
     },
     {
       "path": "community/crates/vulcan-model-transform/tests/preflight_diagnostics.rs",
@@ -149,7 +149,7 @@
     },
     {
       "path": "community/licence-manifest.json",
-      "sha256": "ed0c89501d45cef9df428915a36853c627ea990d1283fd58dde4ce3bc6c5e487"
+      "sha256": "095554eea4983a1061471e4aadcc4f13416f300768bf29e82cb05e1b8d7e2ec8"
     },
     {
       "path": "community/vulcan-origin.json",
@@ -185,7 +185,103 @@
     },
     {
       "path": "hem-target-core/src/target_scenario.rs",
-      "sha256": "a7af8bfc03cff7a0c280dea24c61c6867ba53840c9b2cc4565eada4c7f62b4c9"
+      "sha256": "348b51308235a4f68861e056e294b2c6bfe2a810909a42d5cb07e2a1dc92fc08"
+    },
+    {
+      "path": "hem-target-runtime/package.json",
+      "sha256": "783294450b26cd56629b6217ba270c84ab02918fcbb6b68d85fbcf039a9c8e0d"
+    },
+    {
+      "path": "hem-target-runtime/src/hem/cliTargetHost.ts",
+      "sha256": "23f57b01e43dd5206415f6b296f970bee23a80680aae58dfddc4e7e259be12aa"
+    },
+    {
+      "path": "hem-target-runtime/src/hem/preparedRun.ts",
+      "sha256": "cd4da6f626f235aae5e3074f3825847924f052da8a7d4ee731094c9f07ff6396"
+    },
+    {
+      "path": "hem-target-runtime/src/hem/pythonFhsArguments.test.ts",
+      "sha256": "1c0e815cf5e10d4305841ac03e3dc22ea5a3b53dada5a61c92c6be09417e966d"
+    },
+    {
+      "path": "hem-target-runtime/src/hem/pythonFhsArguments.ts",
+      "sha256": "b4b1bb5b27ab74735cb7c6c9896c1f784b47626c1ae678f41f1191d26a2c3366"
+    },
+    {
+      "path": "hem-target-runtime/src/hem/pythonFhsCompliance.test.ts",
+      "sha256": "3151909ce670ce1b4fbcbdcbff74f1a6d457eedafa0cd110313427f679ba3c33"
+    },
+    {
+      "path": "hem-target-runtime/src/hem/pythonFhsCompliance.ts",
+      "sha256": "a969d7b995552c1176308342c5e2847be7f87dc59097b9422f51988f62ddea39"
+    },
+    {
+      "path": "hem-target-runtime/src/hem/pythonFhsWorker.ts",
+      "sha256": "2de5fb8a7d0b19835106f7dfd37195abdfdabf02f07c163be36034cffcea4387"
+    },
+    {
+      "path": "hem-target-runtime/src/hem/rustFhsWorker.ts",
+      "sha256": "426efa1dc7c29a64476d64d7288f22b92820b17da9dff8007b0f579e191b39a2"
+    },
+    {
+      "path": "hem-target-runtime/src/hem/targetAssets.ts",
+      "sha256": "56d3c584ac615f5c8ee6f608accd1b1021635c33c5761be4c29b83c598161ea0"
+    },
+    {
+      "path": "hem-target-runtime/src/hem/targetCategories.ts",
+      "sha256": "e7bf0dce9c7b1570c0c1f0c4f1791d5d30216109e24949f16ee1224e74f48fd7"
+    },
+    {
+      "path": "hem-target-runtime/src/hem/targetPreparation.test.ts",
+      "sha256": "050a00d2df483b5108821980f9ffb77dc4cf5706435e13575f6b51b44bd96eec"
+    },
+    {
+      "path": "hem-target-runtime/src/hem/targetPreparation.ts",
+      "sha256": "f091b6545df4f9d1d1a3ccd7a5939026c758cab548e7fa33a733639ca66888d9"
+    },
+    {
+      "path": "hem-target-runtime/src/hem/targets.test.ts",
+      "sha256": "65bc3aff597171f4990af4b5a67d576ef8baed1058dec4cb61f620430ad3eeaf"
+    },
+    {
+      "path": "hem-target-runtime/src/hem/targets.ts",
+      "sha256": "11f5af545438e4c9580191181ae801322f9a8e4bfdedd2df30e31d79eb2be643"
+    },
+    {
+      "path": "hem-target-runtime/src/lib/hemValidationModel.test.ts",
+      "sha256": "b5d54dc89a3c7d3775162f9485c48fcbb2a6a68b6dea27ca97956e355e3a36a4"
+    },
+    {
+      "path": "hem-target-runtime/src/lib/hemValidationModel.ts",
+      "sha256": "2681d09aca68dfd8755a46e24893cc702aa2b209716aa4f14f755d74aeb8eb07"
+    },
+    {
+      "path": "hem-target-runtime/src/lib/zoneAllocations.test.ts",
+      "sha256": "21c06d93cb9160e6843c701d42c0180f40658134c95b22ebc01f07d4fa894cfb"
+    },
+    {
+      "path": "hem-target-runtime/src/lib/zoneAllocations.ts",
+      "sha256": "b69af11fef080a10d485f4522325ed994b59758412b4a2323bc7c0301a8297ad"
+    },
+    {
+      "path": "hem-target-runtime/src/utils/textFormatting.ts",
+      "sha256": "ec27d756cc7307f2440735004916769a785993367ca6e54bcc5f533db9db41a2"
+    },
+    {
+      "path": "hem-target-runtime/src/workers/__tests__/batchWorkerFileSystemBridge.test.ts",
+      "sha256": "47e96986d628722f652b7ef24e18ce2c6fecffd896a625d11cd2b76549e88e10"
+    },
+    {
+      "path": "hem-target-runtime/src/workers/batchWorkerFileSystemBridge.ts",
+      "sha256": "c3b0b08048ebb0c4fc2a2714040d08f1da7c297584a9ab186f376b775a833736"
+    },
+    {
+      "path": "hem-target-runtime/src/workers/workerProtocol.ts",
+      "sha256": "16fc0ef31dcf48dd0e8f68a4d1939eec4c8798b4abc29640c8cca25f590319e6"
+    },
+    {
+      "path": "hem-target-runtime/tsconfig.json",
+      "sha256": "004367a4ab007aae0e3427a498ba2154607d4fa469b69e3944003d4b5487abd2"
     },
     {
       "path": "hem_engine_upstream/.github/dependabot.yml",
@@ -5785,11 +5881,11 @@
     },
     {
       "path": "scripts/hem-targets/__tests__/export-runner-sources.test.mjs",
-      "sha256": "d246d3b28aa49400bb0decf90b88933dcda43ca05ff1d872c0885c9bf764b66e"
+      "sha256": "fe2eda0d9ff252e9aec1e221e9498619d213c1c407551cf9629a922b36106c5c"
     },
     {
       "path": "scripts/hem-targets/export-runner-sources.mjs",
-      "sha256": "3f115c9f2b43803133ff61be8fa8436846ab964b359c5434d1f543b1f899a2b9"
+      "sha256": "69952233c9fb417a4e599cf933afafd5f2ac2b5a946c4bb9cf0a73abf334c7ac"
     },
     {
       "path": "scripts/hem-targets/licensing/ADDITIONAL_TERMS.md",
@@ -5797,7 +5893,7 @@
     },
     {
       "path": "scripts/hem-targets/licensing/ATTRIBUTION.md",
-      "sha256": "500a1d96e6f6348b6c299c20e0f52cfe0782da84469ae8c4b99cb8c527fef29a"
+      "sha256": "3215a54d12a67e885ff2060c063895c704122b723afc0a2052f1d7c44e32e06e"
     },
     {
       "path": "scripts/hem-targets/licensing/LICENSE",
@@ -5805,7 +5901,7 @@
     },
     {
       "path": "scripts/hem-targets/licensing/NOTICE.md",
-      "sha256": "aa3b37fd8951057f36753efe7e0981cc2d41348a70e340044b6f42c3a37172b1"
+      "sha256": "7dca23d70dd76f6a5d9bc85ccb5aebb22aae3bb42be4c3472c1cca3722210e72"
     },
     {
       "path": "scripts/hem-targets/licensing/TRADEMARKS.md",
@@ -5813,7 +5909,7 @@
     },
     {
       "path": "scripts/hem-targets/licensing/runtime-header.js",
-      "sha256": "bd206d03bbc398f8c688166e7e4561d7d05ed0d18d75e7078a183e745a2362c6"
+      "sha256": "6121d73935853dc4a5247acc13193137c7595cc1c5de4315ec270ed90ea6067b"
     },
     {
       "path": "scripts/hem-targets/licensing/third-party/FHS-MIT.md",
@@ -6232,7 +6328,7 @@
     "hemEngine": "62d3df705690f33b3fc3e905c9971d4f3743bf2e",
     "hemFhs": "c5ba2673fbd886cfe4fb528f61b376bdf406ebbd",
     "community": {
-      "head": "e553eac1b83d46994b9cb8989c25a97c412cc73c",
+      "head": "53fa15f6066ca7da21cc8171574dd63d7c87d12e",
       "workingTreeDirty": false,
       "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     }
