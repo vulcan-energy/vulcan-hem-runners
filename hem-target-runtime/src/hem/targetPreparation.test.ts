@@ -75,8 +75,11 @@ it('uses a saved matching defaults snapshot without reading mutable workspace fi
   const assets = vi.spyOn(TargetAssets, 'open').mockResolvedValue({ bytes: async () => new TextEncoder().encode('{}') } as unknown as TargetAssets);
   const manifest = { bundleId: target.id, preparation: { schema: 'schema.json', defaults: 'defaults.json' }, artifacts: [{ path: 'schema.json' }, { path: 'defaults.json' }] } as HemTargetManifest;
   try {
-    const jobs = await prepareTargetBatch(config, snapshot, manifest, 'config', 'run', () => JSON.stringify({ ok: true, output: { model: {}, validation: { is_valid: true, errors: [] } } }));
+    const warning = { code: 'W_TARGET_INPUT', path: '/Zone/Room/BuildingElement/Party/u_value_whole_wall', message: 'HEM 1.0.0a9: stale whole-wall U' };
+    const jobs = await prepareTargetBatch(config, snapshot, manifest, 'config', 'run', () => JSON.stringify({ ok: true, output: { model: {}, validation: { is_valid: true, errors: [] }, schema_omissions: [warning, { ...warning, code: 'omitted', message: 'not a warning' }] } }));
     expect(jobs).toHaveLength(1);
+    // Scenario warnings are non-blocking and travel with the job's run record.
+    expect(jobs[0].warnings).toEqual(['HEM 1.0.0a9: stale whole-wall U']);
     expect(read).toHaveBeenCalledTimes(2);
   } finally { assets.mockRestore(); }
 });

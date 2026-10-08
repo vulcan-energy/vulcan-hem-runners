@@ -5,7 +5,7 @@
 import { sha256 } from './targetAssets';
 import type { HemTargetManifest } from './targets';
 export interface PreparedWeather { path: string; epw: string; sha256: string; }
-export interface PreparedHemJob { name: string; input: string; modes: string[]; outputDirectory: string; archiveDirectory?: string; sourceCsv?: string; weather?: PreparedWeather; }
+export interface PreparedHemJob { name: string; input: string; modes: string[]; outputDirectory: string; archiveDirectory?: string; sourceCsv?: string; weather?: PreparedWeather; warnings?: string[]; }
 export async function executePreparedJobs(
   manifest: HemTargetManifest, bundleId: string, jobId: string, jobs: PreparedHemJob[],
   execute: (input: string, modes: string[], weather?: PreparedWeather) => Promise<Record<string, string>>,
@@ -25,7 +25,7 @@ export async function executePreparedJobs(
     // react-doctor-disable-next-line react-doctor/async-defer-await, react-doctor/async-await-in-loop -- the hash is included in this job's marker before any output is written.
     const inputSha256 = await sha256(new TextEncoder().encode(job.input));
     if (job.weather && (!job.weather.epw.trim() || await sha256(new TextEncoder().encode(job.weather.epw)) !== job.weather.sha256)) throw new Error('Prepared weather hash mismatch or empty EPW');
-    const provenance = { ...(job.weather ? { weather: { path: job.weather.path, sha256: job.weather.sha256 } } : {}), target: manifest, inputSha256, modes: job.modes, jobId, name: job.name };
+    const provenance = { ...(job.weather ? { weather: { path: job.weather.path, sha256: job.weather.sha256 } } : {}), target: manifest, inputSha256, modes: job.modes, jobId, name: job.name, ...(job.warnings?.length ? { warnings: job.warnings } : {}) };
     try {
       // A crash or termination leaves this non-complete record. The original input is retained.
       await write(`${archive}/target-run.json`, JSON.stringify({ ...provenance, status: 'running' }));

@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "sourceCommit": "d6db53ce72cabe65f95938527221ef0750d4baf0",
-  "sourceTreeSha256": "1a54c84e94765c4f2d218e3dde41a3b13c61724089fc178f9f7464dfd7128d38",
+  "sourceCommit": "174055ed317d526389d5c422de77e3346ad16688",
+  "sourceTreeSha256": "db115f6f1b94957b3a3f0ee877e8871c9cf52dd8079d9d5496495fa2c55766bc",
   "sourceTreeDirty": true,
-  "originGitTree": "7e46c6b6b76a7eae1c7b702d6c58ab81edbc6aa1",
+  "originGitTree": "c5a0b07db8e6a17dc72abe10aa1a4d32eb81e12e",
   "originWorkingTreeDirty": false,
-  "exportFilesSha256": "1a54c84e94765c4f2d218e3dde41a3b13c61724089fc178f9f7464dfd7128d38",
+  "exportFilesSha256": "db115f6f1b94957b3a3f0ee877e8871c9cf52dd8079d9d5496495fa2c55766bc",
   "files": [
     {
       "path": ".cargo/config.toml",
@@ -17,7 +17,7 @@
     },
     {
       "path": "ATTRIBUTION.md",
-      "sha256": "3215a54d12a67e885ff2060c063895c704122b723afc0a2052f1d7c44e32e06e"
+      "sha256": "6c30ef38aa1bacf04a69bbe787bc45b0da461995c9e6e88742673a03887bc2d4"
     },
     {
       "path": "FHS-MIT-LICENSE.md",
@@ -29,11 +29,11 @@
     },
     {
       "path": "NOTICE.md",
-      "sha256": "7dca23d70dd76f6a5d9bc85ccb5aebb22aae3bb42be4c3472c1cca3722210e72"
+      "sha256": "9a1edb7191827a0c4ce95d0dd1e096484f956db0facba42de2da747b0437f315"
     },
     {
       "path": "README.md",
-      "sha256": "f8762913941d62a3b335e2d611661a55b269de9371f8ca54cb8aabd3b1f782d4"
+      "sha256": "57cfd8f0ca3f2ef8a3a685cb1b5e55dbd15d6336eb45f38c35ba582eeef732bf"
     },
     {
       "path": "TRADEMARKS.md",
@@ -185,7 +185,7 @@
     },
     {
       "path": "hem-target-core/src/target_scenario.rs",
-      "sha256": "348b51308235a4f68861e056e294b2c6bfe2a810909a42d5cb07e2a1dc92fc08"
+      "sha256": "392b65fa1280d583f339fd94b4bb2b10b58f385a767ca7f38810fd40d63a46cb"
     },
     {
       "path": "hem-target-runtime/package.json",
@@ -193,11 +193,11 @@
     },
     {
       "path": "hem-target-runtime/src/hem/cliTargetHost.ts",
-      "sha256": "23f57b01e43dd5206415f6b296f970bee23a80680aae58dfddc4e7e259be12aa"
+      "sha256": "db7d7efbb3612a006ac053b05c13937c58f3d4690df3e7c3ff0dd04260f97420"
     },
     {
       "path": "hem-target-runtime/src/hem/preparedRun.ts",
-      "sha256": "cd4da6f626f235aae5e3074f3825847924f052da8a7d4ee731094c9f07ff6396"
+      "sha256": "31534596529d1b7b608343a33776ac8d6ee07418b164acfdac09374cd4287fb3"
     },
     {
       "path": "hem-target-runtime/src/hem/pythonFhsArguments.test.ts",
@@ -209,7 +209,7 @@
     },
     {
       "path": "hem-target-runtime/src/hem/pythonFhsCompliance.test.ts",
-      "sha256": "3151909ce670ce1b4fbcbdcbff74f1a6d457eedafa0cd110313427f679ba3c33"
+      "sha256": "5a1edbf4b467651a6e663949aa60c9d90d73f75351d60ce78733423a516c5e46"
     },
     {
       "path": "hem-target-runtime/src/hem/pythonFhsCompliance.ts",
@@ -225,7 +225,7 @@
     },
     {
       "path": "hem-target-runtime/src/hem/targetAssets.ts",
-      "sha256": "56d3c584ac615f5c8ee6f608accd1b1021635c33c5761be4c29b83c598161ea0"
+      "sha256": "901d795e2e575c3cf9433d353cab20d5a21417bc47db7d246b39699c827eec62"
     },
     {
       "path": "hem-target-runtime/src/hem/targetCategories.ts",
@@ -233,11 +233,11 @@
     },
     {
       "path": "hem-target-runtime/src/hem/targetPreparation.test.ts",
-      "sha256": "050a00d2df483b5108821980f9ffb77dc4cf5706435e13575f6b51b44bd96eec"
+      "sha256": "b0d40c34efcbde7b8860d94123eb3259218b7428845273ddbfd300234a776230"
     },
     {
       "path": "hem-target-runtime/src/hem/targetPreparation.ts",
-      "sha256": "f091b6545df4f9d1d1a3ccd7a5939026c758cab548e7fa33a733639ca66888d9"
+      "sha256": "57b18f07c7eca8bd6c451b074693b3f0bdd7c3c21d67d860be2227e82dbd5a59"
     },
     {
       "path": "hem-target-runtime/src/hem/targets.test.ts",
@@ -5881,11 +5881,11 @@
     },
     {
       "path": "scripts/hem-targets/__tests__/export-runner-sources.test.mjs",
-      "sha256": "fe2eda0d9ff252e9aec1e221e9498619d213c1c407551cf9629a922b36106c5c"
+      "sha256": "10b4b411f7913b3feba88c4b9df994e7cf72506d765ae51a002d2eb54ece62a3"
     },
     {
       "path": "scripts/hem-targets/export-runner-sources.mjs",
-      "sha256": "69952233c9fb417a4e599cf933afafd5f2ac2b5a946c4bb9cf0a73abf334c7ac"
+      "sha256": "d2d8b751e8155e5915b9cf363c74f210ad86427a4fa262d76f74f83b4c9f678e"
     },
     {
       "path": "scripts/hem-targets/licensing/ADDITIONAL_TERMS.md",
@@ -5893,7 +5893,7 @@
     },
     {
       "path": "scripts/hem-targets/licensing/ATTRIBUTION.md",
-      "sha256": "3215a54d12a67e885ff2060c063895c704122b723afc0a2052f1d7c44e32e06e"
+      "sha256": "6c30ef38aa1bacf04a69bbe787bc45b0da461995c9e6e88742673a03887bc2d4"
     },
     {
       "path": "scripts/hem-targets/licensing/LICENSE",
@@ -5901,7 +5901,7 @@
     },
     {
       "path": "scripts/hem-targets/licensing/NOTICE.md",
-      "sha256": "7dca23d70dd76f6a5d9bc85ccb5aebb22aae3bb42be4c3472c1cca3722210e72"
+      "sha256": "9a1edb7191827a0c4ce95d0dd1e096484f956db0facba42de2da747b0437f315"
     },
     {
       "path": "scripts/hem-targets/licensing/TRADEMARKS.md",
@@ -5909,7 +5909,7 @@
     },
     {
       "path": "scripts/hem-targets/licensing/runtime-header.js",
-      "sha256": "6121d73935853dc4a5247acc13193137c7595cc1c5de4315ec270ed90ea6067b"
+      "sha256": "3953f55731f5250d5c5efd5ce249d231c1d3b9ee23854f245a4fa80a5dc79e6c"
     },
     {
       "path": "scripts/hem-targets/licensing/third-party/FHS-MIT.md",
@@ -6328,7 +6328,7 @@
     "hemEngine": "62d3df705690f33b3fc3e905c9971d4f3743bf2e",
     "hemFhs": "c5ba2673fbd886cfe4fb528f61b376bdf406ebbd",
     "community": {
-      "head": "53fa15f6066ca7da21cc8171574dd63d7c87d12e",
+      "head": "44427a0cd61ff48a52380bf00bda820581a350bd",
       "workingTreeDirty": false,
       "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     }

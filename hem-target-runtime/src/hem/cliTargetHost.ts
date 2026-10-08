@@ -48,7 +48,7 @@ export async function run(request: {
       clearTimeout(startup);
       worker.terminate();
       if (error) reject(new Error(error));
-      else resolve({ targetBundleId: target.id, status: 'complete' });
+      else resolve({ targetBundleId: target.id, status: 'complete', warnings: jobs.flatMap(job => (job.warnings ?? []).map(warning => `${job.name}: ${warning}`)) });
     };
     const startup = setTimeout(() => finish('Target worker startup exceeded 120 seconds'), 120_000);
     worker.onerror = event => finish(event.message || 'Target worker failed');

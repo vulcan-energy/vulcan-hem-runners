@@ -74,13 +74,14 @@ describe('Python four-mode compliance summary', () => {
     const target = HEM_TARGETS.find(target => target.conversionProfile === 'python_fhs_a8')!;
     const manifest = { bundleId: target.id, conversionProfile: target.conversionProfile, modes } as HemTargetManifest;
     const saved = new Map<string, string>();
-    await executePreparedJobs(manifest, target.id, 'synthetic', [{ name: 'tiny', input: '{}', modes, outputDirectory: 'output/tiny' }], async () => {
+    await executePreparedJobs(manifest, target.id, 'synthetic', [{ name: 'tiny', input: '{}', modes, outputDirectory: 'output/tiny', warnings: ['stale whole-wall U'] }], async () => {
       const raw = files();
       return { ...raw, 'fhs_compliance_report.json': JSON.stringify(buildPythonFhsComplianceReport(raw, modes)) };
     }, async (path, content) => { saved.set(path, content); }, () => {});
     const record = JSON.parse(saved.get('output/tiny/target-run.json')!);
     expect(record.status).toBe('complete');
     expect(record.files).toEqual([...Object.keys(files()), 'fhs_compliance_report.json']);
+    expect(record.warnings).toEqual(['stale whole-wall U']);
     expect(JSON.parse(saved.get('output/tiny/fhs_compliance_report.json')!)).toEqual(expected);
     expect(saved.get('output/tiny/model__FHS__postproc_summary.csv')).toBe(files()['model__FHS__postproc_summary.csv']);
   });

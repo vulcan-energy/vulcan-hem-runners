@@ -15,9 +15,9 @@ explicit Origin Terms reference. The owner approved these terms on 2026-10-06.
 This modified, unofficial FHS runner is not an official Home Energy Foundry
 Limited build. Modification date: 2026-10-07. The Corresponding Source for
 this release is identified by the immutable source tag
-[`hem-fhs-preparation-2026-10-08`](https://github.com/vulcan-energy/vulcan-hem-runners/tree/hem-fhs-preparation-2026-10-08).
+[`hem-fhs-preparation-2026-10-08-2`](https://github.com/vulcan-energy/vulcan-hem-runners/tree/hem-fhs-preparation-2026-10-08-2).
 The complete source and build-material archives are linked from the matching
-[GitHub release](https://github.com/vulcan-energy/vulcan-hem-runners/releases/tag/hem-fhs-preparation-2026-10-08).
+[GitHub release](https://github.com/vulcan-energy/vulcan-hem-runners/releases/tag/hem-fhs-preparation-2026-10-08-2).
 
 ## Included third-party material
 
