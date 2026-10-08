@@ -84,3 +84,150 @@ fn python_conversion_profiles_reject_mismatched_engine_wrapper_metadata() {
         .to_string()
         .contains("matching core and FHS wrapper 1.0.0a8"));
 }
+
+#[test]
+fn conversion_profile_wire_compatibility_and_default_are_stable() {
+    use vulcan_model_transform::ConversionProfile;
+    for wire in [
+        "current_rust_fhs",
+        "python_fhs_a8",
+        "python_fhs_a9",
+        "divided_opening_half_partition_v1",
+        "physical_opening_full_partition_v1",
+        "physical_opening_full_partition_party_wall_u_v1",
+    ] {
+        let profile: ConversionProfile = serde_json::from_value(serde_json::json!(wire)).unwrap();
+        assert_eq!(serde_json::to_value(profile).unwrap(), wire);
+    }
+    assert_eq!(
+        serde_json::to_value(ConversionProfile::default()).unwrap(),
+        "current_rust_fhs"
+    );
+}
+
+#[test]
+fn canonical_profiles_preserve_legacy_output_and_accept_independent_versions() {
+    use vulcan_model_transform::ConversionProfile::*;
+    for (legacy, canonical, version) in [
+        (CurrentRustFhs, DividedOpeningHalfPartitionV1, "1.0.0a7"),
+        (PythonFhsA8, PhysicalOpeningFullPartitionV1, "1.0.0a8"),
+        (
+            PythonFhsA9,
+            PhysicalOpeningFullPartitionPartyWallUV1,
+            "1.0.0a9",
+        ),
+    ] {
+        let request = TransformRequest {
+            csv: MINIMAL_CSV.into(),
+            schema_json: MINIMAL_SCHEMA.into(),
+            defaults_json: r#"{"Zone":{},"InfiltrationVentilation":{}}"#.into(),
+            profile: ModelProfile::Fhs,
+            conversion_profile: legacy,
+            version_metadata: VersionMetadata {
+                hem_core_version: version.into(),
+                fhs_wrapper_version: Some(version.into()),
+            },
+        };
+        let old = transform_geometry_csv(request.clone()).unwrap();
+        let mut neutral = request.clone();
+        neutral.conversion_profile = canonical;
+        let new = transform_geometry_csv(neutral.clone()).unwrap();
+        assert_eq!(old.model, new.model);
+        assert_eq!(old.validation, new.validation);
+        neutral.version_metadata = VersionMetadata {
+            hem_core_version: "future-core".into(),
+            fhs_wrapper_version: Some("independent-wrapper".into()),
+        };
+        assert!(transform_geometry_csv(neutral).is_ok());
+    }
+}
+
+#[test]
+fn physical_opening_contracts_require_fhs_but_divided_contracts_keep_core_support() {
+    use vulcan_model_transform::ConversionProfile::*;
+    for conversion_profile in [
+        PythonFhsA8,
+        PythonFhsA9,
+        PhysicalOpeningFullPartitionV1,
+        PhysicalOpeningFullPartitionPartyWallUV1,
+        CurrentRustFhs,
+        DividedOpeningHalfPartitionV1,
+    ] {
+        let result = transform_geometry_csv(TransformRequest {
+            csv: MINIMAL_CSV.into(),
+            schema_json: MINIMAL_SCHEMA.into(),
+            defaults_json: r#"{"Zone":{},"InfiltrationVentilation":{}}"#.into(),
+            profile: ModelProfile::Core,
+            conversion_profile,
+            version_metadata: VersionMetadata {
+                hem_core_version: "caller-core".into(),
+                fhs_wrapper_version: None,
+            },
+        });
+        if matches!(
+            conversion_profile,
+            CurrentRustFhs | DividedOpeningHalfPartitionV1
+        ) {
+            // This minimal fixture is not a complete Core dwelling. It may fail
+            // engine validation, but its profile must pass request validation.
+            assert!(
+                !matches!(
+                    result,
+                    Err(vulcan_model_transform::TransformError::InvalidRequest(_))
+                ),
+                "{conversion_profile:?}: {result:?}"
+            );
+        } else {
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("requires the FHS profile"));
+        }
+    }
+}
+
+#[test]
+fn legacy_window_division_height_reaches_a8_with_a_non_blocking_warning() {
+    let csv = format!(
+        "{MINIMAL_CSV}
+Window Elements
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,frame_area_fraction,free_area_height,mid_height,max_window_open_area,extra_json
+Window,Living,BuildingElementTransparent,1.61,90,1.24,1.3,180,1,0.25,0.95,1.65,0.8,\"{{\"\"window_part_list\"\":[{{\"\"mid_height_air_flow_path\"\":1.5}}]}}\"
+"
+    );
+    let output = transform_geometry_csv(TransformRequest {
+        csv,
+        schema_json: MINIMAL_SCHEMA.into(),
+        defaults_json: r#"{"Zone":{},"InfiltrationVentilation":{}}"#.into(),
+        profile: ModelProfile::Fhs,
+        conversion_profile: vulcan_model_transform::ConversionProfile::PythonFhsA8,
+        version_metadata: VersionMetadata {
+            hem_core_version: "1.0.0a8".into(),
+            fhs_wrapper_version: Some("1.0.0a8".into()),
+        },
+    })
+    .unwrap();
+    let path = "/Zone/Living/BuildingElement/Window/window_part_list";
+    assert_eq!(
+        output.model.pointer(path),
+        Some(
+            &serde_json::json!([{"mid_height":1.5,"free_area_height":0.95,"max_window_open_area":0.8}])
+        )
+    );
+    assert!(
+        output
+            .validation
+            .errors
+            .iter()
+            .all(|e| !e.path.contains("/Window/")),
+        "{:?}",
+        output.validation.errors
+    );
+    let warning = output
+        .schema_omissions
+        .iter()
+        .find(|w| w.path == path)
+        .expect("warning");
+    assert_eq!(warning.code, "W_TARGET_INPUT");
+    assert!(warning.message.starts_with("HEM 1.0.0a8: The opening height used for ventilation (1.5 m) differs from the window's mid-height (1.65 m), both above the ventilation-zone base."), "{}", warning.message);
+}

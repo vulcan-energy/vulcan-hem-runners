@@ -1243,14 +1243,12 @@ pub struct JSONBuilder {
     /// In that case we keep richer FHS-only fields; for Core schemas we rely strictly
     /// on the Core schema's allowed properties when pruning.
     is_fhs_schema: bool,
-    conversion_profile: crate::ConversionProfile,
+    input_contract: crate::InputContract,
     schema_omissions: RefCell<Vec<crate::finalization::SchemaOmission>>,
     /// Parsed from CSV Metadata `ComplianceValidationEnabled` (workflow flag). When `Some(false)`,
     /// we skip injecting implicit `false` defaults for FHS-only root booleans used by validation.
     /// When `None` or `Some(true)`, FHS merges apply those defaults when keys are absent.
     compliance_validation_enabled: Option<bool>,
-    /// Default thermal bridging value (W/K) to use when simplified thermal bridging is disabled and no thermal bridge elements are defined
-    default_thermal_bridging: f64,
     /// FHS cold-water source selected from CSV Metadata `ColdWaterSource`.
     /// Core inputs keep their existing defaults shape; this only canonicalizes FHS-family output.
     cold_water_source: String,
@@ -1265,7 +1263,7 @@ pub struct JSONBuilder {
 
 impl JSONBuilder {
     pub fn set_conversion_profile(&mut self, profile: crate::ConversionProfile) {
-        self.conversion_profile = profile;
+        self.input_contract = profile.input_contract();
     }
 
     /// True when this builder validates against an FHS-family schema (FHS / ECaaS).
@@ -1297,7 +1295,7 @@ impl JSONBuilder {
 
         let mut builder = Self {
             is_fhs_schema: is_fhs,
-            conversion_profile: crate::ConversionProfile::default(),
+            input_contract: crate::ConversionProfile::default().input_contract(),
             schema_omissions: RefCell::new(Vec::new()),
             schema,
             defaults,
@@ -1306,7 +1304,6 @@ impl JSONBuilder {
             opaque_template_wall: None,
             opaque_template_roof: None,
             opaque_template_external_door: None,
-            default_thermal_bridging: 0.2, // Default fallback value
             cold_water_source: COLD_WATER_SOURCE_DEFAULT.to_string(),
             compliance_validation_enabled: None,
             non_fatal_errors: RefCell::new(Vec::new()),
@@ -1334,7 +1331,7 @@ impl JSONBuilder {
 
         let mut builder = Self {
             is_fhs_schema: is_fhs,
-            conversion_profile: crate::ConversionProfile::default(),
+            input_contract: crate::ConversionProfile::default().input_contract(),
             schema_omissions: RefCell::new(Vec::new()),
             schema,
             defaults,
@@ -1343,7 +1340,6 @@ impl JSONBuilder {
             opaque_template_wall: None,
             opaque_template_roof: None,
             opaque_template_external_door: None,
-            default_thermal_bridging: 0.2, // Default fallback value
             cold_water_source: COLD_WATER_SOURCE_DEFAULT.to_string(),
             compliance_validation_enabled: None,
             non_fatal_errors: RefCell::new(Vec::new()),
@@ -1683,8 +1679,6 @@ impl JSONBuilder {
         migrate_vulcan_csv_to_current(&mut sanitized_csv_data)?;
         let csv_data = &sanitized_csv_data;
 
-        // Parse DefaultThermalBridging from metadata early so it's available for zone processing
-        self.parse_default_thermal_bridging_from_metadata(csv_data);
         self.parse_cold_water_source_from_metadata(csv_data);
 
         let mut result = self.defaults.clone();
@@ -1717,7 +1711,7 @@ impl JSONBuilder {
             self.sanitize_fhs_output(&mut result);
         }
 
-        crate::map_target_unobstructed_shading(&mut result, self.conversion_profile);
+        crate::target_mappings::map_contract_unobstructed_shading(&mut result, self.input_contract);
 
         // Schema-based cleanup: removes properties not allowed by the schema
         // This replaces hardcoded cleanup functions with a programmatic approach
@@ -2137,7 +2131,12 @@ impl JSONBuilder {
                     if !valid_types.is_empty() && !valid_types.contains(&schema_element_type) {
                         self.push_non_fatal(
                             "E056",
-                            &format!("Zone/{zone_name}/BuildingElement/{element_name}"),
+                            &crate::json_pointer(&[
+                                "Zone",
+                                zone_name,
+                                "BuildingElement",
+                                element_name,
+                            ]),
                             &format!(
                                 "Unknown building element type '{schema_element_type}' \
                                  (element '{element_name}' in {section_name}) — check the \
@@ -2240,7 +2239,12 @@ impl JSONBuilder {
                     if allowed_building_element_props.is_empty() {
                         self.push_non_fatal(
                             "E056",
-                            &format!("Zone/{zone_name}/BuildingElement/{element_name}"),
+                            &crate::json_pointer(&[
+                                "Zone",
+                                zone_name,
+                                "BuildingElement",
+                                element_name,
+                            ]),
                             &format!(
                                 "No schema properties found for building element type \
                                  '{schema_element_type}' (element '{element_name}') — \
@@ -2428,31 +2432,41 @@ impl JSONBuilder {
                         }
                     }
 
-                    let target_path = format!("Zone/{zone_name}/BuildingElement/{element_name}");
-                    let diagnostics = match self.conversion_profile {
-                        crate::ConversionProfile::PythonFhsA8 => {
-                            crate::target_mappings::map_python_a8_element(
+                    let target_path =
+                        crate::json_pointer(&["Zone", zone_name, "BuildingElement", element_name]);
+                    let contract = self.input_contract;
+                    let diagnostics = match contract.elements {
+                        crate::ElementInputConvention::PhysicalOpeningFullPartition => {
+                            crate::target_mappings::map_physical_opening_full_partition_element(
                                 element_row,
                                 &mut element_obj,
                                 &target_path,
+                                contract.party_wall_requires_whole_u,
+                                metadata_f64(csv_data, "Ventilation_ventilation_zone_base_height")
+                                    .unwrap_or(0.0),
                             )
                         }
-                        crate::ConversionProfile::PythonFhsA9 => {
-                            crate::target_mappings::map_python_a9_element(
-                                element_row,
-                                &mut element_obj,
-                                &target_path,
-                            )
-                        }
-                        crate::ConversionProfile::CurrentRustFhs => {
-                            crate::target_mappings::map_rust_element(
+                        crate::ElementInputConvention::DividedOpeningHalfPartition => {
+                            crate::target_mappings::map_divided_opening_half_partition_element(
                                 element_row,
                                 &mut element_obj,
                                 &target_path,
                             )
                         }
                     };
-                    self.non_fatal_errors.borrow_mut().extend(diagnostics);
+                    let (warnings, errors): (Vec<_>, Vec<_>) = diagnostics
+                        .into_iter()
+                        .partition(|d| d.code == crate::target_mappings::TARGET_INPUT_WARNING);
+                    self.non_fatal_errors.borrow_mut().extend(errors);
+                    self.schema_omissions
+                        .borrow_mut()
+                        .extend(warnings.into_iter().map(|w| {
+                            crate::finalization::SchemaOmission {
+                                code: w.code,
+                                path: w.path,
+                                message: format!("HEM {}: {}", self.hem_core_version, w.message),
+                            }
+                        }));
 
                     // Add to zone's BuildingElement section
                     let zone = result["Zone"][zone_name].as_object_mut().unwrap();
@@ -3390,7 +3404,7 @@ impl JSONBuilder {
                     other => {
                         self.push_non_fatal(
                             "E055",
-                            &format!("HotWaterDemand/{outlet_name}"),
+                            &crate::json_pointer(&["HotWaterDemand", outlet_name]),
                             &format!(
                                 "Hot Water Outlets row '{outlet_name}' has unknown subcategory \
                                  '{other}' and was skipped. Valid: MixerShower, \
@@ -4281,36 +4295,6 @@ impl JSONBuilder {
         Ok(())
     }
 
-    fn parse_default_thermal_bridging_from_metadata(
-        &mut self,
-        csv_data: &HashMap<String, Vec<HashMap<String, Value>>>,
-    ) {
-        // Parse DefaultThermalBridging from metadata early so it's available for zone processing
-        if let Some(metadata_rows) = csv_data.get("Metadata") {
-            for row in metadata_rows {
-                let (field_name, field_value) = extract_metadata_field(row);
-                if field_name.as_deref() == Some("DefaultThermalBridging") {
-                    if let Some(num) = self.csv_number_non_fatal(
-                        field_value.as_ref(),
-                        "DefaultThermalBridging",
-                        "Metadata",
-                    ) {
-                        if num < 0.0 {
-                            self.push_non_fatal(
-                                "E055",
-                                "Metadata",
-                                &format!("'DefaultThermalBridging' must be >= 0, got {num}"),
-                            );
-                        } else {
-                            self.default_thermal_bridging = num;
-                        }
-                    }
-                    break; // Found it, no need to continue
-                }
-            }
-        }
-    }
-
     fn normalize_cold_water_source(raw: &str) -> Option<&'static str> {
         match raw.trim() {
             COLD_WATER_SOURCE_MAINS => Some(COLD_WATER_SOURCE_MAINS),
@@ -4429,7 +4413,8 @@ impl JSONBuilder {
                 let (field_name, field_value) = extract_metadata_field(row);
 
                 if let Some(name) = field_name {
-                    // Skip fields already parsed before root-level merge.
+                    // ColdWaterSource is parsed before root-level merge; DefaultThermalBridging is a
+                    // legacy row no target applies, kept recognised so old CSVs still load.
                     if name == "DefaultThermalBridging" || name == "ColdWaterSource" {
                         continue;
                     }
@@ -4742,7 +4727,7 @@ impl JSONBuilder {
                                                     _ => self.csv_number_non_fatal(
                                                         Some(&val),
                                                         &name,
-                                                        "InfiltrationVentilation/Leaks",
+                                                        "/InfiltrationVentilation/Leaks",
                                                     ),
                                                 }
                                             }
@@ -4772,7 +4757,7 @@ impl JSONBuilder {
                                 if let Some(num) = self.csv_number_non_fatal(
                                     Some(&val),
                                     &name,
-                                    "InfiltrationVentilation/Leaks",
+                                    "/InfiltrationVentilation/Leaks",
                                 ) {
                                     leaks_obj.insert(
                                         leaks_field_name.to_string(),
@@ -4838,7 +4823,7 @@ impl JSONBuilder {
                                     if let Some(num) = self.csv_number_non_fatal(
                                         Some(&val),
                                         name,
-                                        "InfiltrationVentilation",
+                                        "/InfiltrationVentilation",
                                     ) {
                                         if let Some(n) = serde_json::Number::from_f64(num) {
                                             inf_vent_obj
@@ -4850,7 +4835,7 @@ impl JSONBuilder {
                                     if let Some(bool_val) = self.csv_bool_non_fatal(
                                         Some(&val),
                                         name,
-                                        "InfiltrationVentilation",
+                                        "/InfiltrationVentilation",
                                     ) {
                                         inf_vent_obj
                                             .insert(inf_field.to_string(), Value::Bool(bool_val));
@@ -4944,7 +4929,7 @@ impl JSONBuilder {
                 // > defaults profile). Pitch/orientation are rounded to integers for
                 // FHS only (an FHS schema requirement); core keeps fractional values.
                 let mut csv_set_keys: HashSet<String> = HashSet::new();
-                let pv_path = format!("OnSiteGeneration/{element_name}");
+                let pv_path = crate::json_pointer(&["OnSiteGeneration", element_name]);
                 for key in ["peak_power", "base_height", "width", "height"] {
                     if let Some(num) = self.csv_number_non_fatal(row.get(key), key, &pv_path) {
                         pv_system.insert(
@@ -5425,7 +5410,7 @@ impl JSONBuilder {
             if csv_authored.contains(&key) {
                 self.push_non_fatal(
                     "E057",
-                    &format!("SpaceHeatSystem/{key}"),
+                    &crate::json_pointer(&["SpaceHeatSystem", key.as_str()]),
                     &format!(
                         "SpaceHeatSystem '{key}' was authored in the Systems CSV but is not \
                          referenced by any zone. Set the row's Zone so the system heats a zone."
@@ -7197,7 +7182,7 @@ impl JSONBuilder {
                         for name in csv_authored_names {
                             self.push_non_fatal(
                                 "E059",
-                                &format!("SpaceHeatSystem/{name}"),
+                                &crate::json_pointer(&["SpaceHeatSystem", name.as_str()]),
                                 &format!(
                                     "SpaceHeatSystem '{name}' was authored in the Systems CSV, but the legacy Wet Emitters table has no space_heat_system column. Link it from a Wet Emitter row's space_heat_system column, or remove the Systems row."
                                 ),
@@ -7220,7 +7205,7 @@ impl JSONBuilder {
                         for name in unlinked_csv_authored_wet_names {
                             self.push_non_fatal(
                                 "E059",
-                                &format!("SpaceHeatSystem/{name}"),
+                                &crate::json_pointer(&["SpaceHeatSystem", name.as_str()]),
                                 &format!(
                                     "SpaceHeatSystem '{name}' was authored in the Systems CSV but no Wet Emitter row links to it. Link it from a Wet Emitter row's space_heat_system column, or remove the Systems row."
                                 ),
@@ -12512,6 +12497,30 @@ Living,Zone,100,50
     }
 
     #[test]
+    fn legacy_default_thermal_bridging_row_loads_and_leaves_no_trace() {
+        let build = |value: &str| {
+            let csv = format!(
+                "Metadata\nGlobalOrientationOffset,0\nVulcanCsvVersion,3\nDefaultThermalBridging,{value}\n\nZone\nName,Type,volume,floor_area\nLiving,Zone,100,50\n"
+            );
+            let data = CSVParser::new().parse_csv(&csv).expect("CSV should parse");
+            let mut builder =
+                JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+            let json = builder.build_json(&data).expect("legacy CSV should build");
+            (json, builder.take_non_fatal_errors())
+        };
+        let (with_value, errors) = build("5");
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(!with_value.to_string().contains("DefaultThermalBridging"));
+        assert_eq!(
+            with_value,
+            build("0.2").0,
+            "value must never reach merged JSON"
+        );
+        // The row is inert, so even a malformed legacy value must not block the merge.
+        assert!(build("-1").1.is_empty());
+    }
+
+    #[test]
     fn clears_space_heat_system_defaults_when_wet_emitters_absent() {
         let csv = r#"Zone
 Name,Type,volume,floor_area
@@ -12715,10 +12724,12 @@ Name,Type
             ]);
             migrate_vulcan_csv_to_current(&mut source).unwrap();
             let mut output = serde_json::json!({"type":"BuildingElementTransparent"});
-            let errors = crate::target_mappings::map_python_a9_element(
+            let errors = crate::target_mappings::map_physical_opening_full_partition_element(
                 &source["Window Elements"][0],
                 &mut output,
                 "test",
+                true,
+                2.0,
             );
             assert!(errors.is_empty(), "{errors:?}");
             assert_eq!(output["window_part_list"][0]["mid_height"], 1.4);
