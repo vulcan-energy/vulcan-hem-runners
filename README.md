@@ -1,6 +1,6 @@
 # Vulcan HEM FHS runners
 
-Corresponding Source: [source tree at hem-fhs-preparation-2026-10-08](https://github.com/vulcan-energy/vulcan-hem-runners/tree/hem-fhs-preparation-2026-10-08). The complete source and build-material archives are linked from the [matching GitHub release](https://github.com/vulcan-energy/vulcan-hem-runners/releases/tag/hem-fhs-preparation-2026-10-08).
+Corresponding Source: [source tree at hem-fhs-preparation-2026-10-08-2](https://github.com/vulcan-energy/vulcan-hem-runners/tree/hem-fhs-preparation-2026-10-08-2). The complete source and build-material archives are linked from the [matching GitHub release](https://github.com/vulcan-energy/vulcan-hem-runners/releases/tag/hem-fhs-preparation-2026-10-08-2).
 
 This repository contains the narrow FHS target runner source closure for that release.
 

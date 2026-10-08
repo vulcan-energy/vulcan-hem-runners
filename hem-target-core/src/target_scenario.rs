@@ -46,6 +46,10 @@ pub fn update_zone_fabric(zone: &mut Value, fabric_map: &HashMap<String, Map<Str
             };
 
             let is_wall_pitch = pitch_is_wall_band(pitch);
+            // Full-partition targets mark party walls/floors modelled as adjacent
+            // conditioned space; half-partition targets carry no such signal.
+            let party_partition =
+                be_props.get("is_adjacent_space_within_dwelling") == Some(&Value::Bool(false));
             let fabric_key = match element_type.as_deref() {
                 Some("BuildingElementOpaque") if is_wall_pitch && is_external_door => Some("door"),
                 Some("BuildingElementOpaque") if is_wall_pitch => Some("wall"),
@@ -54,9 +58,13 @@ pub fn update_zone_fabric(zone: &mut Value, fabric_map: &HashMap<String, Map<Str
                     Some("roof")
                 }
                 Some("BuildingElementGround") => Some("ground"),
-                Some("BuildingElementAdjacentConditionedSpace") => Some("party_wall"),
-                Some("BuildingElementAdjacentUnconditionedSpace_Simple") => Some("party_wall"),
+                // Party elements only. Within-dwelling partitions and walls to
+                // unheated space inherited this key from the pre-PartyWall
+                // AdjacentZTC era; the package never described them.
                 Some("BuildingElementPartyWall") => Some("party_wall"),
+                Some("BuildingElementAdjacentConditionedSpace") if party_partition => {
+                    Some("party_wall")
+                }
                 _ => None,
             };
 
@@ -66,7 +74,22 @@ pub fn update_zone_fabric(zone: &mut Value, fabric_map: &HashMap<String, Map<Str
                         obj.remove("r_c");
                         obj.remove("u_value");
                         for (k, v) in fabric_props {
+                            // Whole-wall U is target-specific (a9 PartyWall);
+                            // prepare_effective_scenario applies it by schema.
+                            if k == "u_value_whole_wall" {
+                                continue;
+                            }
                             obj.insert(k.clone(), v.clone());
+                        }
+                        // The package is in PartyWall terms (construction to the
+                        // midpoint); a full-partition element spans the whole
+                        // depth. Qualitative capacity classes are already full.
+                        if party_partition {
+                            for k in ["thermal_resistance_construction", "areal_heat_capacity"] {
+                                if let Some(n) = obj.get(k).and_then(Value::as_f64) {
+                                    obj.insert(k.into(), Value::from(n * 2.0));
+                                }
+                            }
                         }
                     }
                 }
@@ -799,7 +822,9 @@ pub fn merge_model(base_model: &mut Value, category: &str, params: &Value) -> Re
                 {
                     for system in systems.values_mut() {
                         // WarmAir may follow an air-to-air replacement, never water plant.
-                        if system.get("type").and_then(Value::as_str) == Some("WarmAir") && !air_sink {
+                        if system.get("type").and_then(Value::as_str) == Some("WarmAir")
+                            && !air_sink
+                        {
                             continue;
                         }
                         if let Some(source) =
@@ -1094,6 +1119,7 @@ pub fn prepare_effective_scenario(
         return Ok(output);
     }
     let mut candidate = output.model.clone();
+    let mut warnings = Vec::new();
     for (category, snippet) in snippets {
         // No FHS target schema accepts what these merges write, or the wrapper
         // overwrites it, so they would fail obscurely or silently change nothing.
@@ -1133,6 +1159,32 @@ pub fn prepare_effective_scenario(
         merge_model(&mut candidate, category, snippet)
             .map_err(|e| PipelineError::InvalidRequest(e.to_string()))?;
         reject_structural_change(&before, &candidate, "")?;
+        if category == "simplified_fabric" {
+            if let Some(whole) = snippet.pointer("/party_wall/u_value_whole_wall") {
+                if declares_property(schema, "u_value_whole_wall") {
+                    set_party_wall_whole_u(&mut candidate, whole);
+                }
+            } else {
+                let version = &output.version_metadata.hem_core_version;
+                for (zone, name) in stale_whole_wall_u(&before, &candidate) {
+                    let segments = [
+                        "Zone",
+                        &zone,
+                        "BuildingElement",
+                        &name,
+                        "u_value_whole_wall",
+                    ];
+                    warnings.push(vulcan_model_transform::finalization::SchemaOmission {
+                    code: "W_TARGET_INPUT".into(),
+                    path: segments
+                        .iter()
+                        .map(|s| format!("/{}", s.replace('~', "~0").replace('/', "~1")))
+                        .collect(),
+                    message: format!("HEM {version}: the fabric package changes party wall '{name}' but not its whole-wall U-value, which is reported in the compliance report only and cannot be derived from the construction resistance. Add u_value_whole_wall to the package's party_wall section to update it."),
+                });
+                }
+            }
+        }
     }
     let processed = snippets
         .iter()
@@ -1176,12 +1228,84 @@ pub fn prepare_effective_scenario(
         })
         .collect::<Vec<_>>();
     output.model = finalized.model;
+    output.schema_omissions.extend(warnings);
     errors.extend(finalized.validation.errors);
     output.validation = ValidationResult {
         is_valid: errors.is_empty(),
         errors,
     };
     Ok(output)
+}
+
+/// (zone, element) of each party wall carrying a whole-wall U-value whose
+/// construction or cavity the merge changed. Whole-wall U is an independent
+/// declared value (a9: compliance report only), so the old one may now
+/// describe a different wall.
+fn stale_whole_wall_u(before: &Value, after: &Value) -> Vec<(String, String)> {
+    const DESCRIBES: [&str; 4] = [
+        "thermal_resistance_construction",
+        "thermal_resistance_cavity",
+        "party_wall_cavity_type",
+        "party_wall_lining_type",
+    ];
+    let mut stale = Vec::new();
+    for (zone, zone_before) in before
+        .get("Zone")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+    {
+        let elements = zone_before
+            .get("BuildingElement")
+            .and_then(Value::as_object);
+        for (name, element) in elements.into_iter().flatten() {
+            let merged = &after["Zone"][zone]["BuildingElement"][name];
+            if element.get("u_value_whole_wall").is_some()
+                && DESCRIBES
+                    .iter()
+                    .any(|k| !same_value(element.get(k), merged.get(k)))
+            {
+                stale.push((zone.clone(), name.clone()));
+            }
+        }
+    }
+    stale
+}
+
+/// Restating 3 as 3.0 is no change.
+fn same_value(a: Option<&Value>, b: Option<&Value>) -> bool {
+    match (a.and_then(Value::as_f64), b.and_then(Value::as_f64)) {
+        (Some(x), Some(y)) => x == y,
+        _ => a == b,
+    }
+}
+
+/// Whether any object in the target schema declares `key` as a property.
+fn declares_property(node: &Value, key: &str) -> bool {
+    match node {
+        Value::Object(map) => {
+            map.get("properties")
+                .and_then(Value::as_object)
+                .is_some_and(|p| p.contains_key(key))
+                || map.values().any(|v| declares_property(v, key))
+        }
+        Value::Array(items) => items.iter().any(|v| declares_property(v, key)),
+        _ => false,
+    }
+}
+
+fn set_party_wall_whole_u(model: &mut Value, whole: &Value) {
+    let zones = model.get_mut("Zone").and_then(Value::as_object_mut);
+    for zone in zones.into_iter().flat_map(|z| z.values_mut()) {
+        let elements = zone
+            .get_mut("BuildingElement")
+            .and_then(Value::as_object_mut);
+        for element in elements.into_iter().flat_map(|e| e.values_mut()) {
+            if element.get("type").and_then(Value::as_str) == Some("BuildingElementPartyWall") {
+                element["u_value_whole_wall"] = whole.clone();
+            }
+        }
+    }
 }
 
 pub fn reject_structural_change(

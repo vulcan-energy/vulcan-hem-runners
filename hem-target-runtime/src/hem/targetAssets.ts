@@ -139,9 +139,9 @@ export class TargetAssets {
 // Published release manifests must be pinned here by hash. No mutable remote catalogue.
 // Entries are generated after the preparation/runtime build is qualified; missing pins fail closed.
 export const RELEASE_MANIFEST_HASHES: Readonly<Record<string, string>> = {
-  "rust-fhs-a7-62d3df70-c5ba2673-v1": "70a65af0e6be8ecd478d595731a659350a1acb49b6b50281c673d4a22c5e61f4",
-  "python-fhs-a8-f2ab6cf7-8ca182b0-v1": "733928eb024be97ac6a9727fbaa256da1bc51d969c427d492007fb0835260e45",
-  "python-fhs-a9-918addad-b9b90138-v1": "9a36fb5070dab79ef8f7cc9e64946f85c7cdaaa83bb61d2689e6492c805f1b98"
+  "rust-fhs-a7-62d3df70-c5ba2673-v1": "66bda0b9b88323ec8759c8ccc4dc9dff8916639771a175cf01e0c4c2c881d485",
+  "python-fhs-a8-f2ab6cf7-8ca182b0-v1": "963f49337f1823e50e7a558f982ddb00a924d71f9ece53111c456bc82504a1b5",
+  "python-fhs-a9-918addad-b9b90138-v1": "f643197c37e7f8986a67c0c6eab32523cb54f5b7e8b4b7b09685b9a66c1faee1"
 };
 export async function loadTargetManifest(id: string): Promise<HemTargetManifest> {
   const target = resolveHemTarget(id);

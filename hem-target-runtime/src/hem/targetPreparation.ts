@@ -225,7 +225,9 @@ export async function prepareTargetBatch(
       const result = JSON.parse(prepare(JSON.stringify(request), JSON.stringify(snippets)));
       if (!result.ok) throw new Error(result.error ?? 'Target preparation failed');
       if (!result.output.validation.is_valid) throw new Error(`Model ${sourceName}: ${result.output.validation.errors.map((error: {message?: string; user_message?: string}) => error.user_message ?? error.message ?? JSON.stringify(error)).join('; ')}`);
-      jobs.push({ name: `${name}_${index}`, input: cloneForHemValidationJson(JSON.stringify(result.output.model)), modes, sourceCsv: source.csv, ...(weather ? { weather: { path: weather.path, epw: weather.epw, sha256: weather.sha256 } } : {}),
+      // Non-blocking scenario diagnostics (e.g. a stale a9 whole-wall U) travel with the run record.
+      const warnings = [...new Set<string>((result.output.schema_omissions ?? []).filter((w: {code?: string}) => w.code === 'W_TARGET_INPUT').map((w: {message: string}) => w.message))];
+      jobs.push({ name: `${name}_${index}`, ...(warnings.length ? { warnings } : {}), input: cloneForHemValidationJson(JSON.stringify(result.output.model)), modes, sourceCsv: source.csv, ...(weather ? { weather: { path: weather.path, epw: weather.epw, sha256: weather.sha256 } } : {}),
         outputDirectory: `output/result_${configName}_${name}_${index}`, archiveDirectory: `output/result_${configName}_${name}_${index}/${target.id}/${runId}` });
     }
   }

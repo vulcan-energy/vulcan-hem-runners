@@ -4,7 +4,7 @@
  * This runtime is subject to Vulcan Origin Terms v1.0; see ADDITIONAL_TERMS.md.
  * Vulcan Community; originally developed by Home Energy Foundry Limited.
  * Origin: https://usevulcan.app/open-source
- * Corresponding Source: https://github.com/vulcan-energy/vulcan-hem-runners/tree/hem-fhs-preparation-2026-10-08
+ * Corresponding Source: https://github.com/vulcan-energy/vulcan-hem-runners/tree/hem-fhs-preparation-2026-10-08-2
  * Runtime origin marker: HEF-VULCAN-RUNTIME-2026
  * Preserve upstream notices and licences. See LICENSE, ADDITIONAL_TERMS.md,
  * NOTICE.md, ATTRIBUTION.md and TRADEMARKS.md.
