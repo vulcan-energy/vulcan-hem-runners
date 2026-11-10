@@ -60,18 +60,6 @@ export type GeometryWorkerValidationResult = {
   errors?: GeometryWorkerValidationError[];
 } & Record<string, unknown>;
 
-export type GeometryWorkerPartFPreflightResult = {
-  is_valid?: boolean;
-  errors?: Array<GeometryWorkerValidationError | null>;
-  raw_engine_error?: unknown;
-} & Record<string, unknown>;
-
-export type GeometryWorkerTemplateCompatibility = {
-  warnings: string[];
-  foundTypes: string[];
-  hasRequiredRootSections: boolean;
-};
-
 export type GeometryWorkerResultMessage = {
   type: 'result';
   ok: boolean;
@@ -81,11 +69,9 @@ export type GeometryWorkerResultMessage = {
   finalCsv?: string;
   error?: string;
   validation?: GeometryWorkerValidationResult;
-  partFPreflight?: GeometryWorkerPartFPreflightResult;
   strictValidationPassed?: boolean;
   schemaOmissions?: Array<{ code: string; path: string; message: string }>;
   scenariosBaseModelEnabled?: boolean;
-  compatibility?: GeometryWorkerTemplateCompatibility;
   debug?: {
     firstChars: string;
     firstLine: string;

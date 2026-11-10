@@ -58,7 +58,7 @@ export function targetWrapper(target: HemTarget) {
   return wrapper;
 }
 
-/** Keep the exact wire profile expected by this target's pinned preparation WASM. */
+/** The exact wire profile this target's conversion expects; existing target preparation artifacts accept only these names. */
 export function targetPreparationContract(target: HemTarget) {
   return {
     profile: targetWrapper(target).profile,
@@ -88,6 +88,12 @@ export const HEM_TARGETS = [
     engineCommit: 'f2ab6cf78860c36d260cb21396b747cc372f2c9d', wrapperCommit: '8ca182b0171a3a928059a9c0ec0145ecefe3f4e9', conversionProfile: 'python_fhs_a8' },
 ] as const satisfies readonly HemTarget[];
 export const RECOMMENDED_HEM_TARGET = HEM_TARGETS[0].id;
+/**
+ * The target of a CSV with no TargetBundleId row: such files were made for Rust a7.
+ * Keep this literal. Never set it to RECOMMENDED_HEM_TARGET: that would move every
+ * unpinned file to a new target without the user choosing it.
+ */
+export const UNPINNED_CSV_TARGET = 'rust-fhs-a7-62d3df70-c5ba2673-v1';
 export function resolveHemTarget(id: string): HemTarget {
   const target = HEM_TARGETS.find(target => target.id === id);
   if (!target) throw new Error(`HEM target '${id}' is unavailable. Select a supported target explicitly; saved runs are never upgraded automatically.`);
@@ -100,14 +106,17 @@ export interface HemTargetManifest {
   engineCommit: string;
   wrapperCommit: string;
   conversionProfile: HemTarget['conversionProfile'];
-  preparation: { javascript: string; wasm: string; schema: string; defaults: string };
+  /** `javascript`/`wasm` are the converter that live manifests pinned. Hosts convert with their own WASM; a7 still runs that file as its runtime. */
+  preparation: { schema: string; defaults: string; javascript?: string; wasm?: string };
   runtime: { javascript: string; wasm?: string; index?: string; wheels?: string[]; packages?: string[]; requiredVersions?: Record<string, string> };
   modes: string[];
   artifacts: TargetArtifact[];
 }
-/** Source archives and notices stay in the published release, outside executable cache readiness. */
+/** What a run needs: not the source archives and notices, and not a pinned converter that is not also the runtime. */
 export function modelArtifacts(manifest: HemTargetManifest): TargetArtifact[] {
-  return manifest.artifacts.filter(artifact => !artifact.path.startsWith('source/') && !artifact.path.startsWith('notices/'));
+  const runtime = [manifest.runtime.javascript, manifest.runtime.wasm];
+  const converter = [manifest.preparation.javascript, manifest.preparation.wasm].filter(path => !runtime.includes(path));
+  return manifest.artifacts.filter(artifact => !artifact.path.startsWith('source/') && !artifact.path.startsWith('notices/') && !converter.includes(artifact.path));
 }
 export function validateTargetManifest(manifest: HemTargetManifest, target: HemTarget): void {
   if (manifest.bundleId !== target.id || manifest.protocol !== 1 || manifest.engineCommit !== target.engineCommit ||
@@ -128,7 +137,7 @@ export function validateTargetManifest(manifest: HemTargetManifest, target: HemT
     sizesByHash.set(artifact.sha256, artifact.bytes);
     paths.add(artifact.path);
   }
-  for (const path of [...Object.values(manifest.preparation), manifest.runtime.javascript, ...(manifest.runtime.wasm ? [manifest.runtime.wasm] : []), ...(manifest.runtime.wheels ?? [])]) {
+  for (const path of [manifest.preparation.schema, manifest.preparation.defaults, manifest.runtime.javascript, ...(manifest.runtime.wasm ? [manifest.runtime.wasm] : []), ...(manifest.runtime.wheels ?? [])]) {
     if (path.startsWith('source/') || path.startsWith('notices/')) throw new Error(`Runtime/preparation cannot reference reserved source/notice material: ${path}`);
     if (!paths.has(path)) throw new Error(`Target manifest is missing required artifact ${path}`);
   }
@@ -150,12 +159,12 @@ export function validateTargetManifest(manifest: HemTargetManifest, target: HemT
   }
 }
 
-/** One target for every model in a batch; absent provenance is never guessed. */
-export function resolveBatchTarget(ids: Array<string | undefined>, savedTarget?: string): HemTarget {
-  if (!ids.length || ids.some(id => !id)) throw new Error('A base model has no saved HEM model version. Open and save each base model in the Geometry editor, then create this batch.');
+/** One target for every model in a batch. */
+export function resolveBatchTarget(ids: string[], savedTarget?: string): HemTarget {
+  if (!ids.length) throw new Error('A batch needs at least one base model.');
   const unique = new Set(ids);
   if (unique.size !== 1) throw new Error('A batch cannot mix HEM targets. Create a separate batch for each target.');
-  const id = ids[0]!;
+  const id = ids[0];
   if (savedTarget && savedTarget !== id) throw new Error('Saved batch target differs from its source. Explicitly refresh and resave the batch.');
   return resolveHemTarget(id);
 }

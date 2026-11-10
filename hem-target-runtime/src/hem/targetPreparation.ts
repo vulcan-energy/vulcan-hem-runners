@@ -9,8 +9,10 @@ import { targetFieldAvailability } from '@vulcan-community/geometry-editor/lib/s
 import { getBatchScenarioEntries } from '@repo/core';
 import { resolveBatchTarget, resolveHemTarget, targetPreparationContract, targetScenarioModes, type HemTarget, type HemTargetManifest } from './targets';
 import { loadTargetManifest, sha256, TargetAssets } from './targetAssets';
+import { csvTarget } from './csvTarget';
 import { correctTargetSchema } from './targetSchemaCorrections';
 import type { PreparedHemJob, PreparedWeather } from './preparedRun';
+import type { WasmVersionInfo } from '@repo/core';
 import { allocatedZones, savedScenarioSelections } from '../lib/zoneAllocations';
 import { parseHeatingProfile, type HeatingProfile } from './heatingProfile';
 import { SAVED_SELECTION_REMEDY, savedSelectionErrors, TARGET_UNSUPPORTED_CATEGORIES } from './targetCategories';
@@ -39,10 +41,9 @@ export interface TargetBatchSnapshot {
   snippets: Record<string, { json: string; sha256: string }>;
   weather?: Record<string, PreparedWeather & { selection?: { json: string; sha256: string } }>;
 }
-export function csvTarget(csv: string): string | undefined { return csvMetadata(csv, 'TargetBundleId'); }
 export async function snapshotBatchTarget(config: unknown, readFile: (path: string) => Promise<string>): Promise<TargetBatchSnapshot> {
   const sources: TargetBatchSnapshot['sources'] = {};
-  const ids: Array<string | undefined> = [];
+  const ids: string[] = [];
   const snippets: TargetBatchSnapshot['snippets'] = {};
   const weather: NonNullable<TargetBatchSnapshot['weather']> = {};
   // The save-time check the Scenarios page runs; MCP and Analyst save through this snapshot.
@@ -139,44 +140,15 @@ export function treatedFloorAreaBatchMessage(config: unknown, snapshot: TargetBa
   return messages.length ? messages.join('\n') : undefined;
 }
 export type PrepareScenario = (request: string, snippets: string) => string;
-const preparations = new Map<string, Promise<PrepareScenario>>();
-/**
- * One preparation instance per target in this context: instantiating the module costs more
- * than a preparation, and the instance keeps its compiled-schema cache. A throw (a Rust
- * panic traps the instance) drops it so the next call starts clean.
- */
-export function loadTargetPreparation(manifest: HemTargetManifest): Promise<PrepareScenario> {
-  const id = manifest.bundleId;
-  let loaded = preparations.get(id);
-  if (!loaded) {
-    loaded = instantiateTargetPreparation(manifest);
-    preparations.set(id, loaded);
-    loaded.catch(() => preparations.delete(id));
-  }
-  return loaded.then(prepare => (request, snippets) => {
-    try { return prepare(request, snippets); } catch (error) { preparations.delete(id); throw error; }
-  });
+/** The app's own converter. The pinned target supplies only the schema and defaults. */
+export function appPreparation(module: { prepare_target_scenario?: unknown }): PrepareScenario {
+  if (typeof module.prepare_target_scenario !== 'function') throw new Error('This app build cannot prepare HEM targets: its WASM does not export prepare_target_scenario');
+  return module.prepare_target_scenario as PrepareScenario;
 }
-async function instantiateTargetPreparation(manifest: HemTargetManifest): Promise<PrepareScenario> {
-  const assets = await TargetAssets.open();
-  const artifact = (path: string) => {
-    const artifact = manifest.artifacts.find(asset => asset.path === path);
-    if (!artifact) throw new Error(`Missing preparation asset ${path}`);
-    return artifact;
-  };
-  const [javascript, wasm] = await Promise.all([
-    assets.bytes(artifact(manifest.preparation.javascript)),
-    assets.bytes(artifact(manifest.preparation.wasm)),
-  ]);
-  const url = URL.createObjectURL(new Blob([javascript as Uint8Array<ArrayBuffer>], { type: 'text/javascript' }));
-  try {
-    // Runtime code is loaded from the selected content-addressed artifact, not the app bundle.
-    // react-doctor-disable-next-line react-doctor/no-dynamic-import-path -- the verified target JavaScript is intentionally imported from a blob URL.
-    const module = await import(/* @vite-ignore */ url);
-    await module.default({ module_or_path: wasm });
-    if (typeof module.prepare_target_scenario !== 'function') throw new Error('Pinned preparation artifact does not implement target preparation protocol 1');
-    return module.prepare_target_scenario;
-  } finally { URL.revokeObjectURL(url); }
+/** The build that converted a run's input, from the host WASM's version file. A run without it is refused, not recorded blank. `remedy` is the host's own instruction. */
+export function preparedByBuild(versionInfo: WasmVersionInfo | null | undefined, remedy: string): NonNullable<PreparedHemJob['preparedBy']> {
+  if (!versionInfo?.build_id || !versionInfo.source_git_commit) throw new Error(`Cannot record which build prepares this run: the WASM version file (wasm_version.json) is missing or has no build_id and source_git_commit. ${remedy}`);
+  return { build_id: versionInfo.build_id, source_git_commit: versionInfo.source_git_commit, variant: versionInfo.variant, sha256: versionInfo.sha256 };
 }
 export async function prepareTargetBatch(
   config: Record<string, unknown>, snapshot: TargetBatchSnapshot, manifest: HemTargetManifest,
@@ -270,7 +242,7 @@ export async function prepareTargetBatch(
         }
       }
       if (heatingProfile && (modes.length !== 1 || modes[0] !== 'actual')) throw new Error('Heating profiles require actual alone; they are not FHS compliance calculations');
-      await assertTargetDefaults(source.csv, source.defaults, defaults_json);
+      await assertTargetDefaults(source.csv, source.defaults, defaults_json, target.version);
       const request = { csv: source.csv, schema_json, defaults_json, ...targetPreparationContract(target) };
       const result = JSON.parse(prepare(JSON.stringify(request), JSON.stringify(snippets)));
       if (!result.ok) throw new Error(result.error ?? 'Target preparation failed');
@@ -373,30 +345,27 @@ export function withFhsInputErrors<T extends { model?: unknown; validation: { is
 }
 
 /** Standalone merge uses the same preparation export as changed scenarios. */
-export async function prepareTargetCsv(csv: string, readFile?: (path: string) => Promise<string>) {
-  const id = csvTarget(csv);
-  if (!id) throw new Error('Select a target before preparing this model');
-  const manifest = await loadTargetManifest(id);
-  return prepareTargetCsvWithManifest(csv, manifest, readFile);
+export async function prepareTargetCsv(csv: string, prepare: PrepareScenario, readFile?: (path: string) => Promise<string>) {
+  const manifest = await loadTargetManifest(csvTarget(csv));
+  return prepareTargetCsvWithManifest(csv, manifest, prepare, readFile);
 }
 
 /** Live preflight: prepares only when this target's preparation files are already downloaded. */
-export async function prepareTargetCsvIfCached(csv: string, readFile?: (path: string) => Promise<string>) {
-  const id = csvTarget(csv);
-  if (!id) return undefined;
-  const manifest = await loadTargetManifest(id);
+export async function prepareTargetCsvIfCached(csv: string, prepare: PrepareScenario, readFile?: (path: string) => Promise<string>) {
+  const manifest = await loadTargetManifest(csvTarget(csv));
   const { missing } = await (await TargetAssets.open()).inspect(preparationManifest(manifest));
-  return missing.length ? undefined : prepareTargetCsvWithManifest(csv, manifest, readFile);
+  return missing.length ? undefined : prepareTargetCsvWithManifest(csv, manifest, prepare, readFile);
 }
+/** Only the pinned content preparation reads; the converter is the caller's. */
 function preparationManifest(manifest: HemTargetManifest): HemTargetManifest {
-  const paths = new Set(Object.values(manifest.preparation));
+  const paths = new Set([manifest.preparation.schema, manifest.preparation.defaults]);
   return { ...manifest, artifacts: manifest.artifacts.filter(artifact => paths.has(artifact.path)) };
 }
 
 /** Explicit local tools verify the manifest digest before calling this same preparation boundary. */
-export async function prepareTargetCsvWithManifest(csv: string, manifest: HemTargetManifest, readFile?: (path: string) => Promise<string>) {
+export async function prepareTargetCsvWithManifest(csv: string, manifest: HemTargetManifest, prepare: PrepareScenario, readFile?: (path: string) => Promise<string>) {
   const id = csvTarget(csv);
-  if (!id || id !== manifest.bundleId) throw new Error('Source CSV and preparation target differ');
+  if (id !== manifest.bundleId) throw new Error('Source CSV and preparation target differ');
   const target = resolveHemTarget(id);
   const assets = await TargetAssets.open();
   await assets.download(preparationManifest(manifest), () => {});
@@ -406,13 +375,12 @@ export async function prepareTargetCsvWithManifest(csv: string, manifest: HemTar
   const ecaas = findEcaasOnlyProductsInCsv(csv).length > 0;
   const ecaasSchema = ecaas ? ECAAS_SCHEMAS[target.wrapperVersion] : undefined;
   const unavailable = ecaas && !ecaasSchema;
-  const [defaults_json, schema_json, capturedDefaults, prepare] = await Promise.all([
+  const [defaults_json, schema_json, capturedDefaults] = await Promise.all([
     text(manifest.preparation.defaults),
     ecaasSchema ? ecaasSchema() : text(manifest.preparation.schema).then(schema => correctTargetSchema(target.id, schema)),
     captureDeclaredDefaults(csv, readFile),
-    loadTargetPreparation(manifest),
   ]);
-  await assertTargetDefaults(csv, capturedDefaults, defaults_json);
+  await assertTargetDefaults(csv, capturedDefaults, defaults_json, target.version);
   const result = JSON.parse(prepare(JSON.stringify({ csv, schema_json,
     defaults_json, ...targetPreparationContract(target) }), '[]'));
   if (!result.ok) throw new Error(result.error ?? 'Target conversion failed');
@@ -437,12 +405,12 @@ async function captureDeclaredDefaults(csv: string, readFile?: (path: string) =>
   JSON.parse(json);
   return { json, sha256: await sha256(new TextEncoder().encode(json)) };
 }
-async function assertTargetDefaults(csv: string, captured: { json: string; sha256: string } | undefined, pinned: string): Promise<void> {
+async function assertTargetDefaults(csv: string, captured: { json: string; sha256: string } | undefined, pinned: string, version: string): Promise<void> {
   const path = csvMetadata(csv, 'DefaultsPath');
   if (!path) return;
   if (!captured || await sha256(new TextEncoder().encode(captured.json)) !== captured.sha256) throw new Error(`Missing or changed saved defaults '${path}'. Explicitly refresh and resave the batch.`);
   if (captured.sha256 !== await sha256(new TextEncoder().encode(pinned))) {
-    throw new Error(`Defaults '${path}' differ from this target's pinned defaults. If it is the stock template, update the sample library to refresh it; otherwise preserve this file and move compatible authored settings into CSV or target-compatible snippets before using the pinned defaults.`);
+    throw new Error(`Defaults '${path}' differ from HEM ${version}'s pinned defaults. If this file is the standard template, refresh it. In the Vulcan app, open Workspace in the profile menu and click Restore Sample Library. Restore replaces every sample library file with the shipped copy. First copy the ones you have edited: shipped snippets, the example model (example_semi_detached.csv) and the tariff files (tariffs.meta.json, Example Energy.csv). If it is your own file, keep a copy, move the settings you need into the CSV or into snippets, then remove the DefaultsPath row from the CSV. HEM ${version} then uses its pinned defaults.`);
   }
 }
 

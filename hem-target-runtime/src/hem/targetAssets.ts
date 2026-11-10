@@ -139,9 +139,9 @@ export class TargetAssets {
 // Published release manifests must be pinned here by hash. No mutable remote catalogue.
 // Entries are generated after the preparation/runtime build is qualified; missing pins fail closed.
 export const RELEASE_MANIFEST_HASHES: Readonly<Record<string, string>> = {
-  "rust-fhs-a7-62d3df70-c5ba2673-v1": "117bc2684a5dc0744497e865e8df27bf61e87f1907a9a86e6b71ab238b94ce96",
-  "python-fhs-a8-f2ab6cf7-8ca182b0-v1": "671617990795f3d0651fc9ec839ced0efe480ac4133e087a3c64b446a24127e0",
-  "python-fhs-a9-918addad-b9b90138-v1": "3558a43a589195c09045a59c21ab180e81f77ea5fd0f45f81aabe51670573fcc"
+  "rust-fhs-a7-62d3df70-c5ba2673-v1": "e1c0bc53d7bdfcf3bddff8eab8f8623d7620caeca447da51178c219ac15c4917",
+  "python-fhs-a8-f2ab6cf7-8ca182b0-v1": "7fee2a81a84036198e467d61f41c6c8fe8f25fadba209689d3794c44fbe635a9",
+  "python-fhs-a9-918addad-b9b90138-v1": "b7a52e5b1f2f9477f4c20e9ddc6b572a55eaae21dc6242b4aee0fefafbb11011"
 };
 // The bytes are verified against the build's pinned hash, so one load per id is final.
 const manifests = new Map<string, Promise<HemTargetManifest>>();

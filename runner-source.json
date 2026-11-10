@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "sourceCommit": "5a5d42c205ddb3f2ae2b7b20a3dd1c9c5debb8c8",
-  "sourceTreeSha256": "915802afec99e02e8caffb48fe4ee769a575ddaacfbf32b19e2dec5837b3d146",
+  "sourceCommit": "bbab1f27ab5608ab00b5cd612fc53f0edacfef75",
+  "sourceTreeSha256": "1968c26b4fc4ebd11a1507fe5a4135838e032892885694db10c85cd2218ff1ec",
   "sourceTreeDirty": true,
-  "originGitTree": "16e06af5f15486d10734e5561883a6e37f6d93ec",
+  "originGitTree": "47f49a478f4c67d6547339f225af1fab1821d1ba",
   "originWorkingTreeDirty": false,
-  "exportFilesSha256": "915802afec99e02e8caffb48fe4ee769a575ddaacfbf32b19e2dec5837b3d146",
+  "exportFilesSha256": "1968c26b4fc4ebd11a1507fe5a4135838e032892885694db10c85cd2218ff1ec",
   "files": [
     {
       "path": ".cargo/config.toml",
@@ -77,7 +77,7 @@
     },
     {
       "path": "community/crates/vulcan-csv-codec/Cargo.toml",
-      "sha256": "144d96e6f9cf5678bf82eb1f6071077d550c803023415280a9dd805158b6c972"
+      "sha256": "c3568b1ace59ce7b7ace36fd6b7dfda516ab9b37e641af25194ac935371cc1d5"
     },
     {
       "path": "community/crates/vulcan-csv-codec/src/error.rs",
@@ -89,19 +89,19 @@
     },
     {
       "path": "community/crates/vulcan-csv-codec/src/parser.rs",
-      "sha256": "909d4b5ed5c38d38bd35f053e7fea4cdb7fdfd07b309a223ab8493d1b9cbb89d"
+      "sha256": "317e217a0fe600058b9026d1ece79b6ddbfa2ae408d15e962904fc66cb024ea0"
     },
     {
       "path": "community/crates/vulcan-csv-codec/tests/parser_contract.rs",
-      "sha256": "0b754909b47437f9cb2b3e29b50c8d88e952468633b8ff67cdb4c0f2beb71e1d"
+      "sha256": "8472665d1e254316432237a8762c40d2f338c994ec955baab9a569237942e2b6"
     },
     {
       "path": "community/crates/vulcan-model-transform/Cargo.toml",
-      "sha256": "4abff0d1fe5acc8fbf6f7fb6c24691fcd74ef8f3af810fbf4d898c7eef6a7320"
+      "sha256": "fc25f3004723e039f007054fd5882a0440e347290349ea25db8a6f817737ca7b"
     },
     {
       "path": "community/crates/vulcan-model-transform/src/builder.rs",
-      "sha256": "d3175bd9afd45d4f21772661995c2d5f8049d0838b9e169c71a4adfcfe7dec63"
+      "sha256": "79850cdf2dc455e4d3bc229979c659658846b294120e501ad46033059428012a"
     },
     {
       "path": "community/crates/vulcan-model-transform/src/finalization.rs",
@@ -125,7 +125,7 @@
     },
     {
       "path": "community/crates/vulcan-model-transform/tests/explicit_inputs.rs",
-      "sha256": "3f212a73c7646904c0b7ab6954add90a31e3e69820bd1aba8d96bab4e736d856"
+      "sha256": "7858ebb0be1f46f5b9fe8393c0a0ec2e3ed70181ec802b8f23f6ddf96a496bbb"
     },
     {
       "path": "community/crates/vulcan-model-transform/tests/preflight_diagnostics.rs",
@@ -154,6 +154,10 @@
     {
       "path": "community/vulcan-origin.json",
       "sha256": "a8d36cdf854992ef1bf135df6f5442febafd5915e0ba069ed6e905634009a10e"
+    },
+    {
+      "path": "hem-target-core/Cargo.lock",
+      "sha256": "3acdfa81b1648a67fc836d31a6548761775b7ec3886abd396c54d01bd0b038ff"
     },
     {
       "path": "hem-target-core/Cargo.toml",
@@ -217,7 +221,11 @@
     },
     {
       "path": "hem-target-runtime/src/hem/cliTargetHost.ts",
-      "sha256": "a3e03ce2afde3b19cb6fba5fd2c80d706dfd399eadd41d201559416c784b8505"
+      "sha256": "16db1c3046e60735656114ddd46c506ab6381e81eb187e7661180d4aa5d29b07"
+    },
+    {
+      "path": "hem-target-runtime/src/hem/csvTarget.ts",
+      "sha256": "7e9f9c9b45c1d34805d0cc9107a12f1e0f3fb92cee8f64289041855d4a860eed"
     },
     {
       "path": "hem-target-runtime/src/hem/heatingProfile.test.ts",
@@ -241,7 +249,7 @@
     },
     {
       "path": "hem-target-runtime/src/hem/preparedRun.ts",
-      "sha256": "b3415da2b2c28d2896ef32fd0f622878b3c04f629f9540da8967c67ddcf5f7f8"
+      "sha256": "74e8f5f1f28c84d8dd1eba49821043a937d205fcfa69926d969c6264c9997602"
     },
     {
       "path": "hem-target-runtime/src/hem/pythonFhsArguments.test.ts",
@@ -273,7 +281,7 @@
     },
     {
       "path": "hem-target-runtime/src/hem/targetAssets.ts",
-      "sha256": "71c7f5a1e8cfbba4c1548c4f8c1ccd4690cca9003c6589edb0aa4ce74a428f73"
+      "sha256": "faf227058fafffc970b009b2e88f62c21d17a9ad89816b709015dbc149be0fc2"
     },
     {
       "path": "hem-target-runtime/src/hem/targetCategories.ts",
@@ -281,11 +289,11 @@
     },
     {
       "path": "hem-target-runtime/src/hem/targetPreparation.test.ts",
-      "sha256": "14b515a72d4ada7bfc93be24885ace923339a8b22761c0e618189fda7ab5ec87"
+      "sha256": "e534efd5983061e48c6c610f1ef32d334e4e25edaa3420d212f11e3631eeac4a"
     },
     {
       "path": "hem-target-runtime/src/hem/targetPreparation.ts",
-      "sha256": "dfa8a566357fa2c214ef708c8b4c70860c9e98762617ba307d61f1c9cb4ff40e"
+      "sha256": "d99027f871f763943cd50d5a2be83aacea55630dc4c7f87e455ae900835f1145"
     },
     {
       "path": "hem-target-runtime/src/hem/targetSchemaCorrections.test.ts",
@@ -297,11 +305,11 @@
     },
     {
       "path": "hem-target-runtime/src/hem/targets.test.ts",
-      "sha256": "d26e4920c48408dbedf597d10201e244defed120f94874723409130e4308691a"
+      "sha256": "a624e445c3fb19224274457c430361c2711934304f0283b1c9d2f60606296a1e"
     },
     {
       "path": "hem-target-runtime/src/hem/targets.ts",
-      "sha256": "552748370ca070afe6d05b857d7c5778f8c2318ce4060b92eb971f71c9b3283c"
+      "sha256": "68e8493248919811342ea0c31eae168361d13107ff9fd61bb2f863fb5170ca2d"
     },
     {
       "path": "hem-target-runtime/src/lib/hemValidationModel.test.ts",
@@ -333,7 +341,7 @@
     },
     {
       "path": "hem-target-runtime/src/workers/workerProtocol.ts",
-      "sha256": "16fc0ef31dcf48dd0e8f68a4d1939eec4c8798b4abc29640c8cca25f590319e6"
+      "sha256": "2b1b186210e7d229ece5887d4de0923c35816bfceff8ab6dec6387a0f2d36495"
     },
     {
       "path": "hem-target-runtime/tsconfig.json",
@@ -5929,7 +5937,7 @@
     },
     {
       "path": "hem_target_wrapper/src/lib.rs",
-      "sha256": "e9788ccea5a62dcc21b67735323dee90c29361bf1205f3a90358b6f4b4ed7bcc"
+      "sha256": "2ef0f468dbd8cf8ba5e991a78043de7ceddc6934b1c824ac48c7e96a9e4d85ac"
     },
     {
       "path": "scripts/build-fhs-target-wasm.sh",
@@ -6384,7 +6392,7 @@
     "hemEngine": "62d3df705690f33b3fc3e905c9971d4f3743bf2e",
     "hemFhs": "c5ba2673fbd886cfe4fb528f61b376bdf406ebbd",
     "community": {
-      "head": "d5c75f562d46d49c17b28bb7f0f452178605dcb3",
+      "head": "038ed7674defbeb4c733763fed4113adc74789ae",
       "workingTreeDirty": false,
       "trackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     }

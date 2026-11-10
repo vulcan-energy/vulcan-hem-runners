@@ -4,9 +4,10 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { webcrypto } from 'node:crypto';
-import { csvTarget, ecaasOnlyBatchMessage, treatedFloorAreaBatchMessage, snapshotBatchTarget, prepareTargetBatch, prepareTargetCsvWithManifest, withPythonFanPositionErrors, authoredOmissionWarning, withFhsInputErrors } from './targetPreparation';
+import { ecaasOnlyBatchMessage, treatedFloorAreaBatchMessage, snapshotBatchTarget, prepareTargetBatch, prepareTargetCsvWithManifest, withPythonFanPositionErrors, authoredOmissionWarning, withFhsInputErrors } from './targetPreparation';
 import ecaasSchema from '../../../schemas/ecaas_input_fhs.schema.json?raw';
-import { HEM_TARGETS, type HemTargetManifest } from './targets';
+import { HEM_TARGETS, UNPINNED_CSV_TARGET, type HemTargetManifest } from './targets';
+import { csvTarget } from './csvTarget';
 import { TargetAssets } from './targetAssets';
 import { correctTargetSchema } from './targetSchemaCorrections';
 import { TARGET_UNSUPPORTED_CATEGORIES } from './targetCategories';
@@ -54,8 +55,9 @@ describe('saved batch target snapshots', () => {
     expect(snapshot.snippets['input/batch_parameters/airtightness/small.json'].json).toBe(snippet);
     expect(read).toHaveBeenCalledTimes(2);
   });
-  it('requires an explicit pin for legacy files and rejects mixed models', async () => {
-    await expect(snapshotBatchTarget({ one: { base_json: ['legacy'] } }, async () => '#Metadata\nVulcanCsvVersion,2')).rejects.toThrow('Open and save each base model');
+  it('takes a file without a pin as a7 and rejects mixed models', async () => {
+    expect((await snapshotBatchTarget({ one: { base_json: ['legacy'] } }, async () => '#Metadata\nVulcanCsvVersion,2')).targetBundleId).toBe(UNPINNED_CSV_TARGET);
+    await expect(snapshotBatchTarget({ one: { base_json: ['a', 'b'] } }, async path => path.includes('/a.csv') ? '#Metadata\nVulcanCsvVersion,2' : `TargetBundleId,${HEM_TARGETS[1].id}`)).rejects.toThrow('cannot mix');
     await expect(snapshotBatchTarget({ one: { base_json: ['a', 'b'] } }, async path => `TargetBundleId,${path.includes('/a.csv') ? HEM_TARGETS[0].id : HEM_TARGETS[1].id}`)).rejects.toThrow('cannot mix');
   });
   it('refuses categories a pinned target cannot run, as the app does at save', async () => {
@@ -65,6 +67,8 @@ describe('saved batch target snapshots', () => {
   });
   it('handles quoted metadata and rejects duplicate pins', () => {
     expect(csvTarget('"TargetBundleId","pin"')).toBe('pin');
+    expect(csvTarget('#Metadata\nVulcanCsvVersion,3\n')).toBe(UNPINNED_CSV_TARGET);
+    expect(csvTarget('Metadata\nTargetBundleId,\n')).toBe(UNPINNED_CSV_TARGET);
     expect(() => csvTarget('TargetBundleId,a\nTargetBundleId,b')).toThrow('conflicting');
   });
 });
@@ -176,7 +180,7 @@ it('captures declared defaults and refuses a customized canonical template inste
   const manifest = { bundleId: target.id, preparation: { schema: 'schema.json', defaults: 'defaults.json' }, artifacts: [{ path: 'schema.json' }, { path: 'defaults.json' }] } as HemTargetManifest;
   const prepare = vi.fn();
   try {
-    await expect(prepareTargetBatch(config, snapshot, manifest, 'config', 'run', '2026-01-01T00:00:00.000Z', prepare)).rejects.toThrow('differ from this target');
+    await expect(prepareTargetBatch(config, snapshot, manifest, 'config', 'run', '2026-01-01T00:00:00.000Z', prepare)).rejects.toThrow(`Defaults 'input/defaults/defaults_template.json' differ from HEM ${target.version}'s pinned defaults.`);
     expect(prepare).not.toHaveBeenCalled();
     snapshot.sources.model.defaults!.json = '{}';
     await expect(prepareTargetBatch(config, snapshot, manifest, 'config', 'run', '2026-01-01T00:00:00.000Z', prepare)).rejects.toThrow('changed saved defaults');
@@ -275,20 +279,22 @@ describe('ECaaS-only product stop', () => {
 
 describe('ECaaS schema selection', () => {
   const hp = 'Systems,,\nName,Type,extra_json\nHP,System,"{""HeatSourceWet"":{""hp"":{""type"":""HeatPump"",""product_reference"":""123""}}}"\n';
-  // The preparation module is loaded from a blob URL; a data: module records the request it receives.
-  const module = `export default async () => {}; export function prepare_target_scenario(request) {
-    globalThis.preparedRequest = JSON.parse(request);
-    return JSON.stringify({ ok: true, output: { model: {}, schema_omissions: [], validation: { is_valid: true, errors: [] } } }); }`;
+  let preparedRequest: { schema_json: string } | undefined;
+  const prepare = (request: string) => {
+    preparedRequest = JSON.parse(request);
+    return JSON.stringify({ ok: true, output: { model: {}, schema_omissions: [], validation: { is_valid: true, errors: [] } } });
+  };
+  const fetched: string[] = [];
   const prepareCsv = async (target: (typeof HEM_TARGETS)[number], csv: string) => {
     const manifest = { bundleId: target.id, preparation: { schema: 'schema.json', defaults: 'defaults.json', javascript: 'prep.js', wasm: 'prep.wasm' },
       artifacts: ['schema.json', 'defaults.json', 'prep.js', 'prep.wasm'].map(path => ({ path })) } as unknown as HemTargetManifest;
-    const assets = vi.spyOn(TargetAssets, 'open').mockResolvedValue({ download: async () => {},
+    const assets = vi.spyOn(TargetAssets, 'open').mockResolvedValue({ download: async (fetch: HemTargetManifest) => { fetched.push(fetch.artifacts.map(({ path }) => path).join()); },
       bytes: async ({ path }: { path: string }) => new TextEncoder().encode(path === 'schema.json' ? '"target schema"' : '{}') } as unknown as TargetAssets);
-    // jsdom has no blob URLs.
-    Object.assign(URL, { createObjectURL: () => `data:text/javascript,${encodeURIComponent(module)}`, revokeObjectURL: () => {} });
     try {
-      const output = await prepareTargetCsvWithManifest(`TargetBundleId,${target.id}\n${csv}`, manifest);
-      return { output, schema: (globalThis as unknown as { preparedRequest: { schema_json: string } }).preparedRequest.schema_json };
+      const output = await prepareTargetCsvWithManifest(`TargetBundleId,${target.id}\n${csv}`, manifest, prepare);
+      // The caller supplies the converter; preparation fetches only the pinned schema and defaults.
+      expect(new Set(fetched)).toEqual(new Set(['schema.json,defaults.json']));
+      return { output, schema: preparedRequest!.schema_json };
     } finally { assets.mockRestore(); }
   };
   const a7 = HEM_TARGETS.find(target => target.version === '1.0.0a7')!;
