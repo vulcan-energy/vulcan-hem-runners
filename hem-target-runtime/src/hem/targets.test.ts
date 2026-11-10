@@ -4,8 +4,10 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { webcrypto } from 'node:crypto';
-import { HEM_TARGETS, targetPreparationContract, targetScenarioModes, assertRustTargetVersions, type HemTarget, modelArtifacts, resolveBatchTarget, resolveHemTarget, validateTargetManifest, type HemTargetManifest } from './targets';
-import { RELEASE_MANIFEST_HASHES, TargetAssets, sha256 } from './targetAssets';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { HEM_TARGETS, requiresDetailedThermalBridges, targetPreparationContract, targetScenarioModes, assertRustTargetVersions, type HemTarget, modelArtifacts, resolveBatchTarget, resolveHemTarget, validateTargetManifest, type HemTargetManifest } from './targets';
+import { RELEASE_MANIFEST_HASHES, TargetAssets, loadTargetManifest, sha256 } from './targetAssets';
 import { executePreparedJobs } from './preparedRun';
 
 beforeEach(() => vi.stubGlobal('crypto', webcrypto));
@@ -13,6 +15,20 @@ const target = HEM_TARGETS[1];
 const manifest = (): HemTargetManifest => ({ bundleId: target.id, protocol: 1, engineCommit: target.engineCommit, wrapperCommit: target.wrapperCommit,
   conversionProfile: target.conversionProfile, preparation: { javascript: 'prep.js', wasm: 'prep.wasm', schema: 'schema.json', defaults: 'defaults.json' },
   runtime: { javascript: 'python.mjs', index: 'runtime/', wheels: ['hem.whl'], requiredVersions: { 'hem-core': '1.0.0a9', 'hem-fhs-wrapper': '1.0.0a9' } }, modes: ['actual'], artifacts: ['prep.js','prep.wasm','schema.json','defaults.json','python.mjs','hem.whl','runtime/pyodide.asm.js','runtime/pyodide.asm.wasm','runtime/pyodide-lock.json','runtime/python_stdlib.zip'].map(path => ({ path, bytes: 1, sha256: 'a'.repeat(64) })) });
+describe('detailed thermal bridge contract', () => {
+  it('matches the Rust input-contract table for every conversion profile', () => {
+    const rust = readFileSync(resolve(__dirname, '../../../community/crates/vulcan-model-transform/src/lib.rs'), 'utf8');
+    const table = rust.slice(rust.indexOf('let (physical_openings, whole_u, detailed_bridges) = match self'));
+    const arms = [...table.slice(0, table.indexOf('};')).matchAll(/((?:Self::\w+\s*\|?\s*)+)=>\s*\{?\s*\((true|false), (true|false), (true|false)\)/g)];
+    const rustContract = new Map(arms.flatMap(arm => [...arm[1].matchAll(/Self::(\w+)/g)].map(variant =>
+      [variant[1].replace('UV1', '_u_v1').replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase(), arm[4] === 'true'] as const)));
+    expect(rustContract.size).toBe(6);
+    for (const [profile, detailed] of rustContract) expect(requiresDetailedThermalBridges({ conversionProfile: profile } as HemTarget), profile).toBe(detailed);
+  });
+  it('flags only a8 among the selectable targets', () => {
+    expect(HEM_TARGETS.filter(requiresDetailedThermalBridges).map(target => target.version)).toEqual(['1.0.0a8']);
+  });
+});
 describe('immutable target resolution', () => {
   it('pins a release manifest for every selectable target', () => {
     expect(Object.keys(RELEASE_MANIFEST_HASHES).sort()).toEqual(HEM_TARGETS.map(target => target.id).sort());
@@ -29,6 +45,17 @@ describe('immutable target resolution', () => {
     expect(() => validateTargetManifest({ ...manifest(), artifacts: [] }, target)).toThrow('missing');
     const invalid = manifest(); invalid.artifacts[0].path = '../elsewhere';
     expect(() => validateTargetManifest(invalid, target)).toThrow('Invalid artifact');
+  });
+  it('fetches a pinned manifest once per id and retries after a failure', async () => {
+    const id = Object.keys(RELEASE_MANIFEST_HASHES)[0];
+    const fetcher = vi.fn(async () => new Response(null, { status: 503 }));
+    vi.stubGlobal('fetch', fetcher);
+    const first = loadTargetManifest(id);
+    expect(loadTargetManifest(id)).toBe(first);
+    await expect(first).rejects.toThrow('unavailable');
+    await expect(loadTargetManifest(id)).rejects.toThrow('unavailable');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
   });
 });
 describe('complete runtime identity', () => {
@@ -248,12 +275,25 @@ describe('prepared execution lifecycle with stubbed calculation', () => {
     const files: Record<string, string> = {};
     const execute = vi.fn(async () => ({ 'small.csv': 'a\n1' }));
     const write = async (path: string, content: string) => { files[path] = content; };
-    await executePreparedJobs(manifest(), target.id, 'run', [{ ...job, weather }], execute, write, vi.fn());
-    expect(execute).toHaveBeenCalledWith(job.input, job.modes, weather);
+    await executePreparedJobs(manifest(), target.id, 'run', [{ ...job, weather, startedAt: '2026-01-01T00:00:00.000Z' }], execute, write, vi.fn());
+    expect(execute).toHaveBeenCalledWith(job.input, job.modes, weather, undefined);
     expect(files['output/synthetic/weather.epw']).toBe(epw);
-    expect(JSON.parse(files['output/synthetic/target-run.json']).weather).toEqual({ path: weather.path, sha256: weather.sha256 });
+    expect(JSON.parse(files['output/synthetic/target-run.json'])).toMatchObject({ weather: { path: weather.path, sha256: weather.sha256 }, startedAt: '2026-01-01T00:00:00.000Z' });
     execute.mockClear();
     await expect(executePreparedJobs(manifest(), target.id, 'run', [{ ...job, weather: { ...weather, epw: 'tampered' } }], execute, write, vi.fn())).rejects.toThrow('weather hash');
+    expect(execute).not.toHaveBeenCalled();
+  });
+  it('records the selected operating profile and rejects compliance before invoking the engine', async () => {
+    const heatingProfile = { type: 'reference' as const };
+    const files: Record<string, string> = {};
+    const execute = vi.fn(async () => ({ 'small.csv': 'a\n1' }));
+    const write = async (path: string, content: string) => { files[path] = content; };
+    await executePreparedJobs(manifest(), target.id, 'profile', [{ ...job, heatingProfile }], execute, write, vi.fn());
+    expect(execute).toHaveBeenCalledWith(job.input, job.modes, undefined, heatingProfile);
+    expect(JSON.parse(files['output/synthetic/target-run.json'])).toMatchObject({ calculationKind: 'operating-sensitivity', heatingProfile, status: 'complete' });
+    execute.mockClear();
+    const allModes = { ...manifest(), modes: ['actual', 'notional'] };
+    await expect(executePreparedJobs(allModes, target.id, 'bad', [{ ...job, heatingProfile, modes: ['actual', 'notional'] }], execute, write, vi.fn())).rejects.toThrow('not FHS compliance');
     expect(execute).not.toHaveBeenCalled();
   });
   it('rejects mismatched targets and unsupported modes before execution', async () => {

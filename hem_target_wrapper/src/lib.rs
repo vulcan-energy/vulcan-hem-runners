@@ -120,3 +120,16 @@ mod tests {
         assert!(run_target_input("[]", "model", r#"["actual"]"#, None).contains("JSON object"));
     }
 }
+
+/// Protocol 1: FHS actual export followed by core replay for operating sensitivities.
+#[wasm_bindgen]
+pub fn target_heating_profile_protocol_version() -> u32 { 1 }
+
+#[wasm_bindgen]
+pub fn run_target_stage(model_json: &str, stage: &str, weather_epw: Option<String>) -> String {
+    setup_panic_hook();
+    match hem_target_core::operating::run_target_stage_inner(model_json, stage, weather_epw.as_deref()) {
+        Ok(result) => result.to_string(),
+        Err(error) => serde_json::json!({"status":"failed", "error":error}).to_string(),
+    }
+}

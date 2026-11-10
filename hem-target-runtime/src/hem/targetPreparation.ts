@@ -4,20 +4,26 @@
 
 import { cloneForHemValidationJson } from '../lib/hemValidationModel';
 import { defaultsReadPathAttempts } from '@vulcan-community/geometry-editor/lib/workspacePaths';
-import Papa from 'papaparse';
+import { EXTRA_JSON_UI_KEYS } from '@vulcan-community/geometry-editor/lib/csvPresetUtils';
+import { targetFieldAvailability } from '@vulcan-community/geometry-editor/lib/schemaCache';
 import { getBatchScenarioEntries } from '@repo/core';
-import { resolveBatchTarget, resolveHemTarget, targetPreparationContract, targetScenarioModes, type HemTargetManifest } from './targets';
+import { resolveBatchTarget, resolveHemTarget, targetPreparationContract, targetScenarioModes, type HemTarget, type HemTargetManifest } from './targets';
 import { loadTargetManifest, sha256, TargetAssets } from './targetAssets';
+import { correctTargetSchema } from './targetSchemaCorrections';
 import type { PreparedHemJob, PreparedWeather } from './preparedRun';
-import { allocatedZones } from '../lib/zoneAllocations';
-import { TARGET_UNSUPPORTED_CATEGORIES } from './targetCategories';
+import { allocatedZones, savedScenarioSelections } from '../lib/zoneAllocations';
+import { parseHeatingProfile, type HeatingProfile } from './heatingProfile';
+import { SAVED_SELECTION_REMEDY, savedSelectionErrors, TARGET_UNSUPPORTED_CATEGORIES } from './targetCategories';
 import { formatCategoryName } from '../utils/textFormatting';
 import {
   ecaasOnlyProductLabels,
   ecaasOnlyProductMessage,
   findEcaasOnlyProductsInCsv,
 } from '@vulcan-community/geometry-editor/geometry/validation/ecaasOnlyProducts';
-import { parseCsvSections } from '@vulcan-community/geometry-editor/geometry/io/csvSectionRows';
+import { csvMetadataValue as csvMetadata, parseCsvSections } from '@vulcan-community/geometry-editor/geometry/io/csvSectionRows';
+import { parseCsvToGeometry } from '@vulcan-community/geometry-editor/geometry/io/parseCsvToGeometry';
+import { validateSpaceLabels } from '@vulcan-community/geometry-editor/geometry/validation/validateSpaceLabels';
+import { editorFloorsAndElementsForParsedCsv } from '@vulcan-community/geometry-editor/lib/floorDerivation';
 
 /**
  * ECaaS input schema per HEM version (bundle ids are content-addressed, so keying by
@@ -33,21 +39,15 @@ export interface TargetBatchSnapshot {
   snippets: Record<string, { json: string; sha256: string }>;
   weather?: Record<string, PreparedWeather & { selection?: { json: string; sha256: string } }>;
 }
-function csvMetadata(csv: string, key: string): string | undefined {
-  const rows = Papa.parse<string[]>(csv, { skipEmptyLines: true }).data;
-  const values: string[] = [];
-  for (const row of rows) {
-    if (row[0]?.replace(/^#\s*/, '').trim() === key) values.push(row[1]?.trim() ?? '');
-  }
-  if (values.length > 1) throw new Error(`CSV contains conflicting ${key} metadata`);
-  return values[0];
-}
 export function csvTarget(csv: string): string | undefined { return csvMetadata(csv, 'TargetBundleId'); }
 export async function snapshotBatchTarget(config: unknown, readFile: (path: string) => Promise<string>): Promise<TargetBatchSnapshot> {
   const sources: TargetBatchSnapshot['sources'] = {};
   const ids: Array<string | undefined> = [];
   const snippets: TargetBatchSnapshot['snippets'] = {};
   const weather: NonNullable<TargetBatchSnapshot['weather']> = {};
+  // The save-time check the Scenarios page runs; MCP and Analyst save through this snapshot.
+  const selectionErrors = getBatchScenarioEntries(config).flatMap(({ name, value }) => savedSelectionErrors({ name, ...savedScenarioSelections(value) }));
+  if (selectionErrors.length) throw new Error(selectionErrors.join('\n'));
   for (const { value } of getBatchScenarioEntries(config)) {
     const weatherChoice = selectedWeather(value);
     // Preserve configuration order so the first missing/invalid saved input is deterministic.
@@ -112,6 +112,32 @@ export function ecaasOnlyBatchMessage(config: unknown, snapshot: TargetBatchSnap
   }
   return labels.size ? ecaasOnlyProductMessage([...labels]) : undefined;
 }
+function treatedFloorAreaErrors(csv: string): string[] {
+  // Without labels there is nothing to check, and the strict parser must not gate such a source.
+  if (!/^#?Space Labels\b/m.test(csv)) return [];
+  const parsed = parseCsvToGeometry(csv);
+  const { elements } = editorFloorsAndElementsForParsedCsv(parsed);
+  return validateSpaceLabels(
+    Object.fromEntries(parsed.spaceLabels.map((label) => [label.id, label])),
+    parsed.spaceLabels.map((label) => label.id),
+    {
+      zones: parsed.zones,
+      elementsById: Object.fromEntries(elements.map((element) => [element.id, element])),
+      // As the editor: the FHS check applies whatever ComplianceValidationEnabled says.
+      complianceValidationEnabled: true,
+    },
+  ).issues.map((issue) => issue.message);
+}
+/** Stop message when a model that would run has a materially wrong treated floor area. */
+export function treatedFloorAreaBatchMessage(config: unknown, snapshot: TargetBatchSnapshot): string | undefined {
+  const names = new Set(getBatchScenarioEntries(config).flatMap(({ value }) =>
+    Array.isArray(value.base_json) ? value.base_json as string[] : []));
+  const messages = [...names].flatMap((name) => {
+    const source = snapshot.sources[name];
+    return source ? treatedFloorAreaErrors(source.csv).map((message) => `${name}: ${message}`) : [];
+  });
+  return messages.length ? messages.join('\n') : undefined;
+}
 export type PrepareScenario = (request: string, snippets: string) => string;
 const preparations = new Map<string, Promise<PrepareScenario>>();
 /**
@@ -154,7 +180,7 @@ async function instantiateTargetPreparation(manifest: HemTargetManifest): Promis
 }
 export async function prepareTargetBatch(
   config: Record<string, unknown>, snapshot: TargetBatchSnapshot, manifest: HemTargetManifest,
-  configName: string, runId: string, prepare: PrepareScenario,
+  configName: string, runId: string, startedAt: string, prepare: PrepareScenario,
 ): Promise<PreparedHemJob[]> {
   const target = resolveHemTarget(snapshot.targetBundleId);
   if (manifest.bundleId !== target.id) throw new Error('Batch and preparation target differ');
@@ -165,9 +191,13 @@ export async function prepareTargetBatch(
     return new TextDecoder().decode(await assets.bytes(artifact));
   };
   const [schema_json, defaults_json] = await Promise.all([
-    text(manifest.preparation.schema),
+    text(manifest.preparation.schema).then(schema => correctTargetSchema(target.id, schema)),
     text(manifest.preparation.defaults),
   ]);
+  const targetSchema = JSON.parse(schema_json) as { $defs?: { Tank?: { properties?: Record<string, unknown> } } };
+  const tank = targetSchema.$defs?.Tank;
+  // CSV preparation drops a cylinder init_temp the target does not declare; snippets match that.
+  const omitsCylinderInitTemp = !!tank && !tank.properties?.init_temp;
   const jobs: PreparedHemJob[] = [];
   for (const { name, value } of getBatchScenarioEntries(config)) {
     const weatherChoice = selectedWeather(value);
@@ -187,7 +217,7 @@ export async function prepareTargetBatch(
     const entries = Object.entries(value).filter(([key]) => key !== 'zone_allocations');
     for (const [category, choices] of entries) {
       if (TARGET_UNSUPPORTED_CATEGORIES.has(category) && Array.isArray(choices) && choices.length > 0) {
-        throw new Error(`${name}: ${formatCategoryName(category)} can't run with HEM model versions yet. Open this Batch Config in Scenarios, uncheck it and save it again.`);
+        throw new Error(`${name}: ${formatCategoryName(category)} can't run with HEM model versions yet — ${SAVED_SELECTION_REMEDY}.`);
       }
     }
     let combinations: Array<Array<[string, string]>> = [[]];
@@ -204,7 +234,10 @@ export async function prepareTargetBatch(
       // react-doctor-disable-next-line react-doctor/async-await-in-loop -- jobs are validated in their saved Cartesian-product order.
       if (await sha256(new TextEncoder().encode(source.csv)) !== source.sha256) throw new Error('Saved batch source snapshot identity/hash mismatch; explicitly refresh and resave it.');
       const snippets: Array<[string, unknown]> = [];
+      const parameterFiles: string[] = [];
+      const omittedWarnings: string[] = [];
       let modes = ['actual'];
+      let heatingProfile: HeatingProfile | undefined;
       for (const [category, choice] of combination) {
         if (category === 'base_json' || category === 'weather_files' || category === 'weather_file' || (category === 'external_conditions' && weather)) continue;
         if (category === 'model_wrappers') {
@@ -218,20 +251,125 @@ export async function prepareTargetBatch(
         // Preserve snippet-order validation and fail before invoking the preparation runtime.
         // react-doctor-disable-next-line react-doctor/async-await-in-loop -- same ordered preparation contract as the saved combinations.
         if (await sha256(new TextEncoder().encode(captured.json)) !== captured.sha256) throw new Error(`Missing or changed saved snippet ${path}. Refresh and resave the batch.`);
-        snippets.push([category, JSON.parse(captured.json)]);
+        if (category === 'heating_profiles') heatingProfile = parseHeatingProfile(JSON.parse(captured.json));
+        else {
+          const snippet = JSON.parse(captured.json);
+          const cylinder = snippet?.HotWaterSource?.['hw cylinder'];
+          if (category === 'hot_water_source' && omitsCylinderInitTemp && cylinder && 'init_temp' in cylinder) {
+            delete cylinder.init_temp;
+            omittedWarnings.push(`HEM ${target.version}: the cylinder init_temp in this hot water snippet is not used. It was omitted from the run.`);
+          }
+          // Compliance snippets write root keys; a count the target's schema lacks is not an input there.
+          if (category === 'compliance_settings') {
+            const absent = Object.keys(snippet).filter(key => targetFieldAvailability(targetSchema, [key]) === 'absent');
+            absent.forEach(key => delete snippet[key]);
+            if (absent.length) omittedWarnings.push(`HEM ${target.version}: ${absent.join(', ')} in this compliance snippet is not used. It was omitted from the run.`);
+          }
+          snippets.push([category, snippet]);
+          parameterFiles.push(`${category}/${choice}.json`);
+        }
       }
+      if (heatingProfile && (modes.length !== 1 || modes[0] !== 'actual')) throw new Error('Heating profiles require actual alone; they are not FHS compliance calculations');
       await assertTargetDefaults(source.csv, source.defaults, defaults_json);
       const request = { csv: source.csv, schema_json, defaults_json, ...targetPreparationContract(target) };
       const result = JSON.parse(prepare(JSON.stringify(request), JSON.stringify(snippets)));
       if (!result.ok) throw new Error(result.error ?? 'Target preparation failed');
-      if (!result.output.validation.is_valid) throw new Error(`Model ${sourceName}: ${result.output.validation.errors.map((error: {message?: string; user_message?: string}) => error.user_message ?? error.message ?? JSON.stringify(error)).join('; ')}`);
+      const snippetKeys = new Set(snippets.filter(([category]) => category === 'compliance_settings').flatMap(([, snippet]) => Object.keys(snippet as object)));
+      result.output = withFhsInputErrors(withPythonFanPositionErrors(result.output, target), source.csv, snippetKeys);
+      if (!result.output.validation.is_valid) {
+        // The model prepared alone, to tell its own errors from the ones that appear only with this scenario's files.
+        const base = JSON.parse(prepare(JSON.stringify(request), '[]'));
+        if (!base.ok) throw new Error(base.error ?? 'Target preparation failed');
+        const modelErrors = withFhsInputErrors(withPythonFanPositionErrors(base.output, target), source.csv).validation.errors;
+        throw new Error(`Scenario ${name}_${index}. ${scenarioValidationMessage(result.output.validation.errors, modelErrors, sourceName!, parameterFiles)}`);
+      }
       // Non-blocking scenario diagnostics (e.g. a stale a9 whole-wall U) travel with the run record.
-      const warnings = [...new Set<string>((result.output.schema_omissions ?? []).filter((w: {code?: string}) => w.code === 'W_TARGET_INPUT').map((w: {message: string}) => w.message))];
-      jobs.push({ name: `${name}_${index}`, ...(warnings.length ? { warnings } : {}), input: cloneForHemValidationJson(JSON.stringify(result.output.model)), modes, sourceCsv: source.csv, ...(weather ? { weather: { path: weather.path, epw: weather.epw, sha256: weather.sha256 } } : {}),
-        outputDirectory: `output/result_${configName}_${name}_${index}`, archiveDirectory: `output/result_${configName}_${name}_${index}/${target.id}/${runId}` });
+      const authoredOmission = authoredOmissionWarning(result.output.schema_omissions, source.csv, target.version);
+      const warnings = [...new Set<string>([...omittedWarnings, ...(authoredOmission ? [authoredOmission] : []), ...(result.output.schema_omissions ?? []).filter((w: {code?: string}) => w.code === 'W_TARGET_INPUT').map((w: {message: string}) => w.message)])];
+      jobs.push({ startedAt, ...(heatingProfile ? { heatingProfile } : {}), name: `${name}_${index}`, ...(warnings.length ? { warnings } : {}), input: cloneForHemValidationJson(JSON.stringify(result.output.model)), modes, sourceCsv: source.csv, ...(weather ? { weather: { path: weather.path, epw: weather.epw, sha256: weather.sha256 } } : {}),
+        ...(parameterFiles.length ? { parameterFiles } : {}), outputDirectory: `output/result_${configName}_${name}_${index}`, archiveDirectory: `output/result_${configName}_${name}_${index}/${target.id}/${runId}` });
     }
   }
   return jobs;
+}
+
+type ValidationError = { path?: string; code?: string; keyword?: string; message?: string; user_message?: string };
+/**
+ * Validation errors grouped by what was observed: whether the model prepared alone also fails the same rule
+ * at the same place, or the error occurs only when the scenario's parameter files are applied. Which of those
+ * files causes it is not known, as several can set the same section.
+ */
+function scenarioValidationMessage(errors: ValidationError[], modelErrors: ValidationError[], model: string, parameterFiles: string[]): string {
+  // Messages quote the failing object, which the scenario's files can change, so errors are compared by rule and place.
+  // ponytail: two different errors of the same kind at the same path compare equal.
+  const key = (error: ValidationError) => [error.path, error.code, error.keyword].join('\n');
+  const own = new Set(modelErrors.map(key));
+  const describe = (list: ValidationError[]) => list.map(error => {
+    const text = error.user_message ?? error.message ?? JSON.stringify(error);
+    return error.path ? `${text} at ${error.path}` : text;
+  }).join('; ');
+  const inModel = errors.filter(error => own.has(key(error)));
+  const scenarioOnly = errors.filter(error => !own.has(key(error)));
+  return [
+    ...inModel.length ? [`The model "${model}" has ${inModel.length === 1 ? 'this error' : 'these errors'} without the scenario's parameter files as well: ${describe(inModel)}.`] : [],
+    ...scenarioOnly.length ? [`${scenarioOnly.length === 1 ? 'This error occurs' : 'These errors occur'} only with the scenario's parameter files applied (${parameterFiles.join(', ')}): ${describe(scenarioOnly)}.`] : [],
+  ].join(' ');
+}
+
+const PYTHON_FLAT_POSITION_VENT_TYPES = new Set(['Intermittent MEV', 'Centralised continuous MEV', 'Decentralised continuous MEV']);
+
+/**
+ * The schemas accept `position_exhaust` on these fans, but Python HEM reads only the flat fields and
+ * fails with a raw KeyError. Report it as a required field before the run.
+ */
+export function withPythonFanPositionErrors<T extends { model?: unknown; validation: { is_valid: boolean; errors: unknown[] } }>(output: T, target: HemTarget): T {
+  if (target.runtime !== 'python') return output;
+  const fans = (output.model as { InfiltrationVentilation?: { MechanicalVentilation?: Record<string, Record<string, unknown>> } } | undefined)
+    ?.InfiltrationVentilation?.MechanicalVentilation ?? {};
+  const errors = Object.entries(fans)
+    .filter(([, fan]) => PYTHON_FLAT_POSITION_VENT_TYPES.has(String(fan.vent_type)) && fan.orientation360 === undefined)
+    .map(([name]) => ({
+      code: 'E026',
+      keyword: 'required',
+      path: `/InfiltrationVentilation/MechanicalVentilation/${name.replace(/~/g, '~0').replace(/\//g, '~1')}/orientation360`,
+      message: `'orientation360' is a required property`,
+      user_message: `Fan "${name}": this HEM version needs height, orientation and pitch as separate fields. In Advanced, set Exhaust position to Flat fields.`,
+    }));
+  return errors.length ? { ...output, validation: { ...output.validation, is_valid: false, errors: [...output.validation.errors, ...errors] } } : output;
+}
+
+/** Element keys the editor keeps for itself; dropping them from a run costs the user nothing. */
+const EDITOR_ONLY_KEYS = new Set<string>([...EXTRA_JSON_UI_KEYS, 'floor_id', 'geometry_face', 'party_wall_lining_type', 'dormer_bundle', 'parent_netting_area']);
+
+/**
+ * One line naming the values this source set that the target dropped. A template value never
+ * appears in the CSV, which is how it is told apart from an authored one.
+ */
+export function authoredOmissionWarning(omissions: Array<{ code?: string; path: string }> | undefined, csv: string, version: string): string | undefined {
+  const fields = [...new Set((omissions ?? []).filter(omission => omission.code === 'TARGET_FIELD_OMITTED').map(omission => omission.path.slice(omission.path.lastIndexOf('/') + 1).replace(/~1/g, '/').replace(/~0/g, '~')))]
+    .filter(field => !field.startsWith('_') && !EDITOR_ONLY_KEYS.has(field) && csv.includes(field));
+  return fields.length ? `HEM ${version} does not use ${fields.join(', ')} from this model. Omitted from the run; the source keeps ${fields.length > 1 ? 'them' : 'it'}.` : undefined;
+}
+
+const ROOM_COUNTS_TAKEN_FROM_TEMPLATE = ['NumberOfBedrooms', 'NumberOfWetRooms'];
+
+/**
+ * Inputs FHS crashes on, and counts the template would silently fill with 1. Reported as
+ * ordinary validation errors before the run. `snippetKeys` are root keys a scenario authored.
+ */
+export function withFhsInputErrors<T extends { model?: unknown; validation: { is_valid: boolean; errors: unknown[] } }>(output: T, csv: string, snippetKeys: ReadonlySet<string> = new Set()): T {
+  const model = (output.model ?? {}) as Record<string, unknown> & { HotWaterDemand?: { Shower?: object; Bath?: object } };
+  const demand = model.HotWaterDemand;
+  const errors: unknown[] = [];
+  if (demand && !Object.keys(demand.Shower ?? {}).length && !Object.keys(demand.Bath ?? {}).length) {
+    errors.push({ code: 'E_FHS_NO_SHOWER_OR_BATH', keyword: 'required', path: '/HotWaterDemand/Shower', message: 'FHS needs a shower or a bath', user_message: 'FHS cannot run a dwelling with no shower and no bath. Add at least one in Hot Water Demand.' });
+  }
+  for (const key of ROOM_COUNTS_TAKEN_FROM_TEMPLATE) {
+    if (model[key] !== undefined && !csvMetadata(csv, key) && !snippetKeys.has(key)) {
+      errors.push({ code: 'E_FHS_MISSING_ROOM_COUNT', keyword: 'required', path: `/${key}`, message: `'${key}' is a required property`, user_message: `${key} is missing from this model, so the template value of 1 would be used. Enter it in Global Settings.` });
+    }
+  }
+  return errors.length ? { ...output, validation: { ...output.validation, is_valid: false, errors: [...output.validation.errors, ...errors] } } : output;
 }
 
 /** Standalone merge uses the same preparation export as changed scenarios. */
@@ -270,7 +408,7 @@ export async function prepareTargetCsvWithManifest(csv: string, manifest: HemTar
   const unavailable = ecaas && !ecaasSchema;
   const [defaults_json, schema_json, capturedDefaults, prepare] = await Promise.all([
     text(manifest.preparation.defaults),
-    ecaasSchema ? ecaasSchema() : text(manifest.preparation.schema),
+    ecaasSchema ? ecaasSchema() : text(manifest.preparation.schema).then(schema => correctTargetSchema(target.id, schema)),
     captureDeclaredDefaults(csv, readFile),
     loadTargetPreparation(manifest),
   ]);
@@ -278,6 +416,7 @@ export async function prepareTargetCsvWithManifest(csv: string, manifest: HemTar
   const result = JSON.parse(prepare(JSON.stringify({ csv, schema_json,
     defaults_json, ...targetPreparationContract(target) }), '[]'));
   if (!result.ok) throw new Error(result.error ?? 'Target conversion failed');
+  result.output = withFhsInputErrors(withPythonFanPositionErrors(result.output, target), csv);
   // Provisional, not a verdict: the next save validates once ECAAS_SCHEMAS gains this version.
   const validation = unavailable ? { is_valid: false, errors: [...result.output.validation.errors, { code: 'ecaas_schema_unavailable', path: '',
     message: `ECaaS-only product: there is no ECaaS schema for HEM ${target.version} yet. Pin this model to HEM ${Object.keys(ECAAS_SCHEMAS).join(' or ')} to validate and submit it to ECaaS.` }] } : result.output.validation;

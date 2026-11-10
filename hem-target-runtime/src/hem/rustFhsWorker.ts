@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // This file is subject to Vulcan Origin Terms v1.0; see scripts/hem-targets/licensing/ADDITIONAL_TERMS.md.
 
+import { installIsolatedRustWorker, type RustWorkerScope } from './isolatedRustWorker';
+import { runHeatingProfile, type HeatingStage } from './heatingProfile';
 import { TargetAssets } from './targetAssets';
 import { resolveHemTarget, assertRustTargetVersions, validateTargetManifest, type HemTargetManifest } from './targets';
 import { executePreparedJobs, type PreparedHemJob } from './preparedRun';
@@ -10,6 +12,7 @@ import { FS_REQUEST_TYPE, FS_RESPONSE_TYPE } from '../workers/workerProtocol';
 let manifest: HemTargetManifest | undefined;
 let runInput: ((input: string, output: string, modes: string, weather?: string) => string) | undefined;
 let supportsWeather = false;
+let runStage: ((input: string, stage: string, weather?: string) => string) | undefined;
 let busy = false;
 const acknowledgements = new BatchWorkerFileSystemAcknowledgements();
 const send = (message: unknown) => self.postMessage(message);
@@ -38,11 +41,13 @@ async function initialize(bundle: HemTargetManifest) {
     supportsWeather = module.target_weather_protocol_version?.() === 1;
     if (typeof module.run_target_input !== 'function') throw new Error('Pinned runtime does not support prepared target jobs');
     runInput = module.run_target_input;
+    runStage = module.target_heating_profile_protocol_version?.() === 1 && typeof module.run_target_stage === 'function' ? module.run_target_stage : undefined;
   } finally { URL.revokeObjectURL(url); }
   manifest = bundle;
   send({ type: 'worker_ready', targetBundleId: bundle.bundleId });
 }
-self.onmessage = async ({ data }) => {
+if (self.name !== 'vulcan-rust-execution') installIsolatedRustWorker(self as unknown as RustWorkerScope);
+else self.onmessage = async ({ data }) => {
   if (data.type === FS_RESPONSE_TYPE) { acknowledgements.acknowledge(data.messageId, data.error ?? null); return; }
   if (busy) { send({ type: 'error', jobId: data.jobId, error: 'A calculation is already active' }); return; }
   busy = true;
@@ -50,7 +55,16 @@ self.onmessage = async ({ data }) => {
     if (data.type === 'initialize') await initialize(data.manifest);
     else if (data.type === 'run_prepared_batch') {
       if (!manifest || !runInput) throw new Error('Rust target is not initialized');
-      await executePreparedJobs(manifest, data.targetBundleId, data.jobId, data.jobs as PreparedHemJob[], async (input, modes, weather) => {
+      await executePreparedJobs(manifest, data.targetBundleId, data.jobId, data.jobs as PreparedHemJob[], async (input, modes, weather, heatingProfile) => {
+        if (heatingProfile) {
+          if (!runStage) throw new Error('Pinned Rust bundle lacks heating profile protocol 1; rebuild and qualify its adapter');
+          const stage: HeatingStage = async (data, step) => {
+            const result = JSON.parse(runStage!(data, step, step === 'preprocess' ? weather?.epw : undefined));
+            if (result.status !== 'calculated') throw new Error(result.error ?? 'Heating profile stage failed');
+            return result.files;
+          };
+          return runHeatingProfile(input, heatingProfile, stage);
+        }
         if (weather && !supportsWeather) throw new Error('Pinned Rust runtime does not implement custom EPW protocol 1; rebuild and qualify its bundle');
         const result = JSON.parse(weather ? runInput!(input, 'model', JSON.stringify(modes), weather.epw) : runInput!(input, 'model', JSON.stringify(modes)));
         if (result.status !== 'calculated') throw new Error(result.error ?? 'Rust calculation failed');
@@ -58,6 +72,6 @@ self.onmessage = async ({ data }) => {
       }, write, (completed, total) => send({ type: 'progress', jobId: data.jobId, progress: { completed, total } }));
       send({ type: 'complete', jobId: data.jobId, targetBundleId: manifest.bundleId, result: { status: 'success', targetBundleId: manifest.bundleId } });
     } else throw new Error('Unknown Rust target message');
-  } catch (error) { send({ type: data.type === 'initialize' ? 'init_error' : 'error', jobId: data.jobId, error: String(error) }); }
+  } catch (error) { send({ type: data.type === 'initialize' ? 'init_error' : 'error', jobId: data.jobId, error: error instanceof Error ? error.message : String(error) }); }
   finally { busy = false; }
 };

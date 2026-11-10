@@ -1,0 +1,84 @@
+Metadata
+VulcanCsvVersion,3
+PartGcompliance,TRUE
+BuildingLength,5
+BuildingWidth,4
+GroundFloorArea,20
+NumberOfBedrooms,1
+NumberOfWetRooms,2
+NumberOfHotTappedRooms,1
+NumberOfUtilityRooms,0
+NumberOfBathrooms,1
+NumberOfSanitaryAccommodations,0
+NumberOfHabitableRooms,1
+HeatingControlType,SeparateTempControl
+KitchenExtractorHoodExternal,FALSE
+PartO_active_cooling_required,FALSE
+General_build_type,house
+General_storeys_in_dwelling,1
+Ventilation_ventilation_zone_base_height,0
+AirPermeability_test_pressure,Standard
+AirPermeability_test_result,4
+
+Zone
+Name,Type,volume,floor_area,height,simplified thermal bridging,livingroom_area,restofdwelling_area
+Room,Zone,50,20,2.5,FALSE,10,10
+
+Exposed Elements
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_external_door,is_unheated_pitched_roof
+North,Room,BuildingElementOpaque,11.3,90,5,2.5,0,0,FALSE,
+East,Room,BuildingElementOpaque,10,90,4,2.5,90,0,FALSE,
+South,Room,BuildingElementOpaque,12.5,90,5,2.5,180,0,FALSE,
+West,Room,BuildingElementOpaque,4,90,1.6,2.5,270,0,FALSE,
+Roof,Room,BuildingElementOpaque,20,0,5,4,0,2.5,FALSE,TRUE
+RoofP,Room,BuildingElementOpaque,10,35,5,2,180,2.5,FALSE,TRUE
+Door,Room,BuildingElementOpaque,1.8,90,0.9,2,180,0,TRUE,
+
+Ground Elements
+Name,Zone,Type,area,perimeter,floor_type,thickness_walls
+Floor,Room,BuildingElementGround,20,18,Slab_no_edge_insulation,0.2
+
+Window Elements
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,frame_area_fraction,free_area_height,mid_height,max_window_open_area,extra_json
+Window,Room,BuildingElementTransparent,1.2,90,1,1.2,0,0.8,0.2,1,1.4,0.6,"{""window_part_list"":[{""mid_height_air_flow_path"":1.4},{""mid_height_air_flow_path"":1.4}]}"
+Rooflight,Room,BuildingElementTransparent,0.5,40,1,0.5,180,3,0.2,0.4,3.2,0.2,"{""window_part_list"":[{""mid_height_air_flow_path"":3.2}]}"
+FlatRL,Room,BuildingElementTransparent,0.5,0,1,0.5,0,3,0.2,0.4,3.2,0.2,"{""window_part_list"":[{""mid_height_air_flow_path"":3.2}]}"
+
+Non-Exposed Elements
+Name,Zone,Type,area,pitch,extra_json
+Party,Room,BuildingElementPartyWall,6,90,"{""u_value_whole_wall"":0.25,""thermal_resistance_construction"":2,""construction_basis"":""half"",""areal_heat_capacity"":""Medium"",""party_wall_cavity_type"":""filled_sealed""}"
+PartyFloor,Room,BuildingElementAdjacentConditionedSpace,10,0,"{""thermal_resistance_construction"":2,""construction_basis"":""full"",""internal_partition_area_basis"":""single_face"",""areal_heat_capacity"":""Medium"",""_vulcan_ui_party_element"":true}"
+Garage,Room,BuildingElementAdjacentUnconditionedSpace_Simple,3,90,"{""thermal_resistance_unconditioned_space"":0.8,""u_value"":0.2,""areal_heat_capacity"":""Medium"",""mass_distribution_class"":""D: Mass equally distributed""}"
+Internal,Room,BuildingElementAdjacentConditionedSpace,4,90,"{""thermal_resistance_construction"":2,""construction_basis"":""full"",""internal_partition_area_basis"":""both_faces"",""areal_heat_capacity"":""Medium""}"
+
+Thermal Bridging Elements
+Name,Zone,Type,length,linear_thermal_transmittance,extra_json
+Floor edge,Room,ThermalBridgeLinear,18,0.05,"{""junction_type"":""E5""}"
+Pt,Room,ThermalBridgePoint,,,"{""heat_transfer_coeff"":0.1}"
+
+Lighting
+Name,Zone,efficacy,count,power
+Lamp,Room,80,1,10
+
+Ventilation Systems
+Name,Type,mid_height_air_flow_path,area_cm2,orientation360,pitch,vent_type,extra_json
+Vent N,Vents,1.5,60,0,90,,{}
+Vent E,Vents,1.5,60,90,90,,{}
+Vent S,Vents,1.5,60,180,90,,{}
+Vent W,Vents,1.5,60,270,90,,{}
+Kitchen fan,MechanicalVentilation,1.5,,180,90,Intermittent MEV,"{""design_outdoor_air_flow_rate"":216,""SFP"":1.5,""EnergySupply"":""mains elec""}"
+Bathroom fan,MechanicalVentilation,1.5,,90,90,Intermittent MEV,"{""design_outdoor_air_flow_rate"":54,""SFP"":1.5,""EnergySupply"":""mains elec""}"
+
+Appliances
+Name,Type,appliancekey
+Fridge,Appliance,Fridge
+
+Hot Water Outlets
+Name,Type,subcategory,flowrate,allow_low_flowrate
+Tap,HotWaterDemand,OtherWaterUseDetails,8,
+Shower,HotWaterDemand,MixerShower,8,FALSE
+
+Systems
+Name,Zone,Type,subcategory,extra_json
+Cylinder,Room,System,HotWaterSource,"{""HotWaterSource"":{""hw cylinder"":{""type"":""StorageTank"",""volume"":80,""daily_losses"":1.68,""init_temp"":55,""ColdWaterSource"":""mains water"",""HeatSource"":{""immersion"":{""type"":""ImmersionHeater"",""power"":3,""EnergySupply"":""mains elec"",""heater_position"":0.1,""thermostat_position"":0.33}}}}}"
+Heater,Room,System,SpaceHeatSystem,"{""SpaceHeatSystem"":{""heater"":{""type"":""InstantElecHeater"",""rated_power"":2.5,""EnergySupply"":""mains elec"",""convective_type"":""Air heating (convectors, fan coils etc.)""}}}"

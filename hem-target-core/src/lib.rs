@@ -5,6 +5,7 @@
 //! Minimal shared source boundary for the FHS target runner.
 
 pub mod in_memory_output;
+pub mod operating;
 pub mod project_flags;
 pub mod runtime;
 mod target_scenario;
@@ -13,6 +14,5 @@ pub use in_memory_output::InMemoryOutputWriter;
 pub use target_scenario::{
     auto_assign_cooling_systems, build_space_heat_system_from_template,
     detect_and_apply_compliance_settings, expand_event_patterns, merge_model,
-    prepare_effective_scenario, prepare_target_scenario, reject_structural_change,
-    update_zone_fabric,
+    prepare_effective_scenario, prepare_target_scenario, update_zone_fabric,
 };

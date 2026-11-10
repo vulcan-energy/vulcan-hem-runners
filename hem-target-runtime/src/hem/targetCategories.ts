@@ -9,19 +9,31 @@ import { zoneAllocationError } from '../lib/zoneAllocations';
  * Scenario categories pinned targets cannot prepare: execution flags the a7 runtime fixes
  * (SAP XML, extra outputs), snippets whose shape no FHS target accepts (lighting, tariff,
  * controls), structural replacements (space heat systems), area rescaling (glazing), and
- * internal gains, which FHS derives itself so the snippet would silently change nothing.
+ * internal gains and events, which FHS derives itself so the snippet would silently change nothing.
  */
 export const TARGET_UNSUPPORTED_CATEGORIES = new Set([
-  'sap_xml', 'additional_outputs', 'lighting', 'glazing', 'space_heat_systems', 'tariff', 'controls', 'internal_gains',
+  'sap_xml', 'additional_outputs', 'lighting', 'glazing', 'space_heat_systems', 'tariff', 'controls', 'internal_gains', 'events',
 ]);
 
-/** Selections a scenario must change before it can be saved for a pinned target. */
-export function scenarioSelectionErrors(scenario: { name: string; parameters: Record<string, string[]>; zone_allocations?: Record<string, Record<string, string[]>> }): string[] {
+type ScenarioSelections = { name: string; parameters: Record<string, string[]>; zone_allocations?: Record<string, Record<string, string[]>> };
+
+/** Selections the Scenarios page must change before it can save for a pinned target, worded for its checkboxes. */
+export function scenarioSelectionErrors(scenario: ScenarioSelections): string[] {
+  return selectionErrors(scenario, 'uncheck it to save');
+}
+
+/** The same check on a saved batch, which MCP and Analyst reach as well as the app. */
+export function savedSelectionErrors(scenario: ScenarioSelections): string[] {
+  return selectionErrors(scenario, SAVED_SELECTION_REMEDY);
+}
+export const SAVED_SELECTION_REMEDY = 'remove it from the scenario, then save the batch';
+
+function selectionErrors(scenario: ScenarioSelections, remedy: string): string[] {
   const zoneError = zoneAllocationError(scenario);
   const errors = zoneError ? [zoneError] : [];
   for (const [category, choices] of Object.entries(scenario.parameters)) {
     if (choices.length > 0 && TARGET_UNSUPPORTED_CATEGORIES.has(category)) {
-      errors.push(`${scenario.name}: ${formatCategoryName(category)} can't run with HEM model versions yet — uncheck it to save.`);
+      errors.push(`${scenario.name}: ${formatCategoryName(category)} can't run with HEM model versions yet — ${remedy}.`);
     }
   }
   return errors;

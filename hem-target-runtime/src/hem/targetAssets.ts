@@ -139,11 +139,22 @@ export class TargetAssets {
 // Published release manifests must be pinned here by hash. No mutable remote catalogue.
 // Entries are generated after the preparation/runtime build is qualified; missing pins fail closed.
 export const RELEASE_MANIFEST_HASHES: Readonly<Record<string, string>> = {
-  "rust-fhs-a7-62d3df70-c5ba2673-v1": "66bda0b9b88323ec8759c8ccc4dc9dff8916639771a175cf01e0c4c2c881d485",
-  "python-fhs-a8-f2ab6cf7-8ca182b0-v1": "963f49337f1823e50e7a558f982ddb00a924d71f9ece53111c456bc82504a1b5",
-  "python-fhs-a9-918addad-b9b90138-v1": "f643197c37e7f8986a67c0c6eab32523cb54f5b7e8b4b7b09685b9a66c1faee1"
+  "rust-fhs-a7-62d3df70-c5ba2673-v1": "117bc2684a5dc0744497e865e8df27bf61e87f1907a9a86e6b71ab238b94ce96",
+  "python-fhs-a8-f2ab6cf7-8ca182b0-v1": "671617990795f3d0651fc9ec839ced0efe480ac4133e087a3c64b446a24127e0",
+  "python-fhs-a9-918addad-b9b90138-v1": "3558a43a589195c09045a59c21ab180e81f77ea5fd0f45f81aabe51670573fcc"
 };
-export async function loadTargetManifest(id: string): Promise<HemTargetManifest> {
+// The bytes are verified against the build's pinned hash, so one load per id is final.
+const manifests = new Map<string, Promise<HemTargetManifest>>();
+export function loadTargetManifest(id: string): Promise<HemTargetManifest> {
+  let loaded = manifests.get(id);
+  if (!loaded) {
+    loaded = fetchTargetManifest(id);
+    manifests.set(id, loaded);
+    loaded.catch(() => manifests.delete(id));
+  }
+  return loaded;
+}
+async function fetchTargetManifest(id: string): Promise<HemTargetManifest> {
   const target = resolveHemTarget(id);
   const hash = RELEASE_MANIFEST_HASHES[id];
   if (!hash) throw new Error(`${target.label} is not available in this app build.`);
