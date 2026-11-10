@@ -55,6 +55,23 @@ pub fn finalize_model(candidate: &Value, schema: &Value) -> Result<FinalizedMode
             }
         })
         .collect::<Vec<_>>();
+    // A failed conditional reports its declared fields as unevaluated beside the real error at
+    // or under that path (a per-metre radiator without `n` lists `c_per_m` and `length`, and its
+    // system lists `emitters`). Projection already removed undeclared fields, so only the real
+    // error is kept.
+    let real_error_at = |path: &str| {
+        errors.iter().any(|e| {
+            e.keyword.as_deref() != Some("unevaluatedProperties")
+                && (e.path == path || e.path.starts_with(&format!("{path}/")))
+        })
+    };
+    let errors = errors
+        .iter()
+        .filter(|e| {
+            e.keyword.as_deref() != Some("unevaluatedProperties") || !real_error_at(&e.path)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
     Ok(FinalizedModel {
         model,
         omissions,
@@ -311,6 +328,8 @@ fn project(
                 let mut locally_declared = false;
                 if let Some(property) = node.get("properties").and_then(|p| p.get(&key)) {
                     locally_declared = true;
+                    // A branch that sets a key to `false` forbids it for this instance.
+                    local_forbidden |= property == &Value::Bool(false);
                     children.push(property);
                 }
                 if let Some(patterns) = node.get("patternProperties").and_then(Value::as_object) {
@@ -379,6 +398,45 @@ fn project(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_failed_conditional_reports_only_its_real_error() {
+        // The shape of the FHS wet emitter schema: an `allOf` conditional nesting another.
+        let schema = json!({"properties":{"emitters":{"type":"array","items":{
+            "properties":{"type":{}},"unevaluatedProperties":false,
+            "allOf":[{"if":{"properties":{"type":{"const":"radiator"}}},
+                "then":{"required":["n"],"properties":{"length":{},"n":{}},
+                    "if":{"required":["length"]},"then":{"properties":{"c_per_m":{}}}}}]}}},
+            "unevaluatedProperties":false});
+        let output = finalize_model(
+            &json!({"emitters":[{"type":"radiator","c_per_m":0.01,"length":1.4}]}),
+            &schema,
+        )
+        .unwrap();
+        let errors: Vec<_> = output
+            .validation
+            .errors
+            .iter()
+            .map(|e| (e.path.as_str(), e.keyword.as_deref()))
+            .collect();
+        assert_eq!(errors, vec![("/emitters/0", Some("required"))]);
+    }
+
+    #[test]
+    fn a_property_a_matching_branch_sets_to_false_is_omitted() {
+        let schema = json!({"properties":{"shape":{},"diameter":{"type":"number"},"perimeter":{"type":"number"}},"allOf":[
+            {"if":{"properties":{"shape":{"const":"circular"}}},"then":{"properties":{"perimeter":false}}},
+            {"if":{"properties":{"shape":{"const":"rectangular"}}},"then":{"properties":{"diameter":false}}}]});
+        let output = finalize_model(
+            &json!({"shape":"rectangular","diameter":200,"perimeter":400}),
+            &schema,
+        )
+        .unwrap();
+        assert_eq!(output.model, json!({"shape":"rectangular","perimeter":400}));
+        assert_eq!(output.omissions[0].path, "/diameter");
+        let circular = json!({"shape":"circular","diameter":200});
+        assert_eq!(finalize_model(&circular, &schema).unwrap().model, circular);
+    }
+
     #[test]
     fn conditional_invalid_declared_data_survives_and_obsolete_fields_are_reported() {
         let schema = json!({"type":"object","properties":{"type":{"type":"string"}},"allOf":[{"if":{"properties":{"type":{"const":"window"}}},"then":{"properties":{"parts":{"type":"array"},"width":{"type":"number"}}}}],"unevaluatedProperties":false});

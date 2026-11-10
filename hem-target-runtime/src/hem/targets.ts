@@ -41,6 +41,17 @@ export interface HemTarget {
   conversionProfile: ConversionProfile;
 }
 
+/**
+ * Mirrors `requires_detailed_thermal_bridges` in vulcan-model-transform's `input_contract`: the
+ * profiles whose wrapper needs bridge records even though the schema may accept a single total.
+ */
+const REQUIRES_DETAILED_THERMAL_BRIDGES: Record<ConversionProfile, boolean> = {
+  current_rust_fhs: false, divided_opening_half_partition_v1: false,
+  python_fhs_a8: true, physical_opening_full_partition_v1: true,
+  python_fhs_a9: false, physical_opening_full_partition_party_wall_u_v1: false,
+};
+export const requiresDetailedThermalBridges = (target: HemTarget): boolean => REQUIRES_DETAILED_THERMAL_BRIDGES[target.conversionProfile];
+
 export function targetWrapper(target: HemTarget) {
   const wrapper = WRAPPERS[target.wrapper];
   if (!wrapper) throw new Error(`Unsupported HEM wrapper: ${target.wrapper}`);

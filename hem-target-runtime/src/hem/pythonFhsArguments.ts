@@ -12,3 +12,22 @@ export function pythonFhsArguments(inputPath: string, modes: string[], weatherPa
     return ['--mode', cliModes[mode]];
   })];
 }
+
+const MAX_DETAIL_LINE = 200;
+
+/**
+ * The final exception of a Pyodide traceback, for people: its header plus any detail lines (the
+ * field and reason of a validation error), on one line. Text with no traceback is already a message.
+ */
+export function pythonFailureMessage(text: string): string {
+  const lastFrame = text.lastIndexOf('\n  File "');
+  if (lastFrame < 0 || !text.includes('Traceback (most recent call last)')) return text;
+  const lines = text.slice(lastFrame + 1).split('\n').slice(1);
+  const header = lines.findIndex(line => line.trim() && !/^\s/.test(line));
+  if (header < 0) return text;
+  // Keep each field path and reason; drop pydantic's dump of the offending input and cap the length.
+  const exception = lines.slice(header).map(line => line.trim().replace(/, input_value=.*$/, ']'))
+    .filter(line => line && !line.startsWith('For further information visit'))
+    .map(line => (line.length > MAX_DETAIL_LINE ? `${line.slice(0, MAX_DETAIL_LINE - 1)}…` : line));
+  return `HEM could not calculate this model. ${exception.join(' ')}`;
+}

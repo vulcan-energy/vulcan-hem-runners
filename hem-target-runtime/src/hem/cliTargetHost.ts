@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // This file is subject to Vulcan Origin Terms v1.0; see scripts/hem-targets/licensing/ADDITIONAL_TERMS.md.
 
-import { ecaasOnlyBatchMessage, loadTargetPreparation, snapshotBatchTarget, prepareTargetBatch, prepareTargetCsvWithManifest, type TargetBatchSnapshot } from './targetPreparation';
+import { ecaasOnlyBatchMessage, treatedFloorAreaBatchMessage, loadTargetPreparation, snapshotBatchTarget, prepareTargetBatch, prepareTargetCsvWithManifest, type TargetBatchSnapshot } from './targetPreparation';
 import { TargetAssets } from './targetAssets';
 import { resolveHemTarget, validateTargetManifest, type HemTargetManifest } from './targets';
 
@@ -17,7 +17,7 @@ declare global {
 /** The CLI supplies verified local bytes; source preparation and calculation use the app modules. */
 export async function run(request: {
   manifest: HemTargetManifest; operation: 'prepare' | 'snapshot' | 'batch'; csv?: string;
-  config?: Record<string, unknown>; configName?: string; jobId: string;
+  config?: Record<string, unknown>; configName?: string; jobId: string; startedAt: string;
 }) {
   const { manifest } = request;
   const target = resolveHemTarget(manifest.bundleId);
@@ -36,12 +36,14 @@ export async function run(request: {
   if (!config || !config.__hem) throw new Error('Save a target batch with its exact source/snippet snapshot before running it through MCP/CLI.');
   const ecaasOnly = ecaasOnlyBatchMessage(config, config.__hem as TargetBatchSnapshot);
   if (ecaasOnly) throw new Error(ecaasOnly);
+  const treatedFloorArea = treatedFloorAreaBatchMessage(config, config.__hem as TargetBatchSnapshot);
+  if (treatedFloorArea) throw new Error(treatedFloorArea);
   // Open -> download -> load is intentionally ordered: preparation reads only verified cached bytes.
   // react-doctor-disable-next-line react-doctor/async-parallel -- download depends on the opened cache; preparation depends on the completed download.
   const assets = await TargetAssets.open();
   await assets.download(manifest, (completed, total) => { void window.targetCliProgress({ status: 'running', stage: 'download', completed, total }); });
   const jobs = await prepareTargetBatch(config, config.__hem as TargetBatchSnapshot, manifest,
-    request.configName!, request.jobId, await loadTargetPreparation(manifest));
+    request.configName!, request.jobId, request.startedAt, await loadTargetPreparation(manifest));
   return new Promise((resolve, reject) => {
     const worker = new Worker(target.runtime === 'python' ? '/python-worker.mjs' : '/rust-worker.mjs', { type: 'module' });
     const finish = (error?: string) => {

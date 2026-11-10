@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // This file is subject to Vulcan Origin Terms v1.0; see scripts/hem-targets/licensing/ADDITIONAL_TERMS.md.
 
-import { pythonFhsArguments } from './pythonFhsArguments';
+import { executePythonHeatingProfile } from './pythonHeatingProfile';
+import { pythonFailureMessage, pythonFhsArguments } from './pythonFhsArguments';
 import { buildPythonFhsComplianceReport } from './pythonFhsCompliance';
 import { TargetAssets } from './targetAssets';
+import { correctTargetSchema, hasTargetSchemaCorrection } from './targetSchemaCorrections';
 import { modelArtifacts, resolveHemTarget, targetWrapper, validateTargetManifest, type HemTargetManifest } from './targets';
 import { BatchWorkerFileSystemAcknowledgements } from '../workers/batchWorkerFileSystemBridge';
 import { FS_REQUEST_TYPE, FS_RESPONSE_TYPE } from '../workers/workerProtocol';
@@ -76,17 +78,23 @@ async function initialize(bundle: HemTargetManifest): Promise<void> {
   for (const [name, version] of Object.entries(bundle.runtime.requiredVersions)) {
     if (versions[name.toLowerCase().replace(/_/g,'-')] !== version) throw new Error(`Python runtime identity mismatch for ${name}`);
   }
+  // The wrapper validates against this file on every run; see targetSchemaCorrections.ts.
+  if (hasTargetSchemaCorrection(bundle.bundleId)) {
+    const schemaPath = py.runPython(`import os, future_homes_standard.schema_validation as v\nos.path.join(os.path.dirname(v.__file__), 'schema.json')`) as string;
+    py.FS.writeFile(schemaPath, correctTargetSchema(bundle.bundleId, py.FS.readFile(schemaPath, { encoding: 'utf8' })));
+  }
   manifest = bundle;
   send({ type: 'worker_ready', targetBundleId: bundle.bundleId });
 }
 async function run(jobId: string, bundleId: string, jobs: PreparedHemJob[]): Promise<void> {
   if (!runtime || !manifest) throw new Error('Python worker is not initialized');
-  await executePreparedJobs(manifest, bundleId, jobId, jobs, async (input, modes, weather) => {
+  await executePreparedJobs(manifest, bundleId, jobId, jobs, async (input, modes, weather, heatingProfile) => {
     const py = runtime!;
     const folder = `/runs/${crypto.randomUUID()}`;
     py.FS.mkdirTree(folder); py.FS.writeFile(`${folder}/model.json`, input);
     try {
       if (weather) py.FS.writeFile(`${folder}/weather.epw`, weather.epw);
+      if (heatingProfile) return await executePythonHeatingProfile(py, folder, input, heatingProfile, weather ? `${folder}/weather.epw` : undefined);
       const args = pythonFhsArguments(`${folder}/model.json`, modes, weather ? `${folder}/weather.epw` : undefined);
       await py.runPythonAsync(`main(${JSON.stringify(args)}, standalone_mode=False)`);
       const output = `${folder}/model__results`;
@@ -107,6 +115,11 @@ self.onmessage = async ({ data }) => {
     if (data.type === 'initialize') await initialize(data.manifest);
     else if (data.type === 'run_prepared_batch') await run(data.jobId, data.targetBundleId, data.jobs);
     else throw new Error(`Unsupported Python worker message ${data.type}`);
-  } catch (error) { send({ type: data.type === 'initialize' ? 'init_error' : 'error', jobId: data.jobId, error: String(error) }); }
+  } catch (error) {
+    const text = error instanceof Error ? error.message : String(error);
+    // A failed job's full traceback is also kept in its target-run.json.
+    console.error(text);
+    send({ type: data.type === 'initialize' ? 'init_error' : 'error', jobId: data.jobId, error: pythonFailureMessage(text) });
+  }
   finally { busy = false; }
 };

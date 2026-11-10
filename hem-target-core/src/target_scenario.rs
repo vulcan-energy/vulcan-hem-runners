@@ -181,27 +181,28 @@ pub fn merge_model(base_model: &mut Value, category: &str, params: &Value) -> Re
                 .and_then(Value::as_f64)
                 .unwrap_or(0.0);
             if let Some(zones_obj) = base_model.get_mut("Zone").and_then(Value::as_object_mut) {
-                for (_zone_name, zone_val) in zones_obj.iter_mut() {
+                for zone_val in zones_obj.values_mut() {
                     if let Some(bes) = zone_val
                         .get_mut("BuildingElement")
                         .and_then(Value::as_object_mut)
                     {
-                        for (_elem_key, elem_val) in bes.iter_mut() {
+                        for elem_val in bes.values_mut() {
                             if let Some(ori) = elem_val.get_mut("orientation360") {
-                                if let Some(v) = ori.as_f64() {
-                                    let mut next = v + add;
-                                    // Normalize into [0, 360)
-                                    while next >= 360.0 {
-                                        next -= 360.0;
-                                    }
-                                    while next < 0.0 {
-                                        next += 360.0;
-                                    }
-                                    *ori = serde_json::json!(next);
-                                }
+                                rotate(ori, add);
                             }
                         }
                     }
+                }
+            }
+            // PV, solar thermal and ventilation openings turn with the dwelling;
+            // surroundings stay put.
+            for section in [
+                "OnSiteGeneration",
+                "InfiltrationVentilation",
+                "HotWaterSource",
+            ] {
+                if let Some(value) = base_model.get_mut(section) {
+                    rotate_all(value, add);
                 }
             }
         }
@@ -427,44 +428,45 @@ pub fn merge_model(base_model: &mut Value, category: &str, params: &Value) -> Re
         }
         "space_heat_emitters" => {
             if let Some(param_systems) = params.get("SpaceHeatSystem").and_then(Value::as_object) {
-                if let Some(base_systems) = base_model
+                let mut no_systems = serde_json::Map::new();
+                let base_systems = base_model
                     .get_mut("SpaceHeatSystem")
                     .and_then(Value::as_object_mut)
-                {
-                    // Exact-name matches first (legacy snippets authored against a
-                    // specific model's system names).
-                    let mut matched_any = false;
-                    for (key, param_system) in param_systems {
-                        if let Some(base_system) = base_systems.get_mut(key) {
-                            update_object(base_system, param_system);
-                            matched_any = true;
-                        }
+                    .unwrap_or(&mut no_systems);
+                // Exact-name matches first (legacy snippets authored against a
+                // specific model's system names).
+                let mut matched_any = false;
+                for (key, param_system) in param_systems {
+                    if let Some(base_system) = base_systems.get_mut(key) {
+                        update_object(base_system, param_system);
+                        matched_any = true;
                     }
-                    // System names in current models are zone-derived ("Zone 1 radiator"),
-                    // so name-keyed snippets can never match them. When nothing matched,
-                    // apply the snippet's emitter configuration to every wet-distribution
-                    // system, preserving each system's identity wiring — the same
-                    // semantics as the zone-scoped path (process_zone_space_heat_emitters).
-                    if !matched_any {
-                        if let Some(template) = param_systems.values().next() {
-                            for system in base_systems.values_mut() {
-                                if system.get("type").and_then(Value::as_str)
-                                    != Some("WetDistribution")
-                                {
-                                    continue;
-                                }
-                                let preserved: Vec<(String, Value)> =
-                                    ["Control", "Zone", "HeatSource"]
-                                        .iter()
-                                        .filter_map(|k| {
-                                            system.get(*k).map(|v| (k.to_string(), v.clone()))
-                                        })
-                                        .collect();
-                                update_object(system, template);
-                                if let Some(obj) = system.as_object_mut() {
-                                    for (k, v) in preserved {
-                                        obj.insert(k, v);
-                                    }
+                }
+                // System names in current models are zone-derived ("Zone 1 radiator"),
+                // so name-keyed snippets can never match them. When nothing matched,
+                // apply the snippet's emitter configuration to every wet-distribution
+                // system, preserving each system's identity wiring — the same
+                // semantics as the zone-scoped path (process_zone_space_heat_emitters).
+                if !matched_any {
+                    if !base_systems.values().any(|system| {
+                        system.get("type").and_then(Value::as_str) == Some("WetDistribution")
+                    }) {
+                        anyhow::bail!("The emitter scenario changes wet emitters, but the model has no wet distribution system. Add one to the model or remove this scenario.");
+                    }
+                    if let Some(template) = param_systems.values().next() {
+                        for system in base_systems.values_mut() {
+                            if system.get("type").and_then(Value::as_str) != Some("WetDistribution")
+                            {
+                                continue;
+                            }
+                            let preserved: Vec<(String, Value)> = ["Control", "Zone", "HeatSource"]
+                                .iter()
+                                .filter_map(|k| system.get(*k).map(|v| (k.to_string(), v.clone())))
+                                .collect();
+                            update_object(system, template);
+                            if let Some(obj) = system.as_object_mut() {
+                                for (k, v) in preserved {
+                                    obj.insert(k, v);
                                 }
                             }
                         }
@@ -612,118 +614,83 @@ pub fn merge_model(base_model: &mut Value, category: &str, params: &Value) -> Re
             }
         }
         "solar_systems" => {
-            if let Some(param_solar) = params.get("OnSiteGeneration") {
-                if base_model.get("OnSiteGeneration").is_none() {
-                    if let Some(base_model_obj) = base_model.as_object_mut() {
-                        base_model_obj
-                            .insert("OnSiteGeneration".to_string(), serde_json::json!({}));
-                    }
-                }
-                if let Some(base_solar) = base_model.get_mut("OnSiteGeneration") {
-                    update_object(base_solar, param_solar);
+            // The snippet states the whole installation; null or {} means none.
+            if let Some(arrays) = params.get("OnSiteGeneration") {
+                let root = base_model
+                    .as_object_mut()
+                    .ok_or_else(|| anyhow::anyhow!("The model is not a JSON object"))?;
+                if arrays.as_object().is_some_and(|a| !a.is_empty()) {
+                    root.insert("OnSiteGeneration".into(), arrays.clone());
+                } else {
+                    root.remove("OnSiteGeneration");
                 }
             }
         }
         "battery_systems" => {
+            // The snippet states every battery; a null battery or {} means none.
             if let Some(param_energy_supply) = params.get("EnergySupply").and_then(Value::as_object)
             {
                 if let Some(base_energy_supply) = base_model
                     .get_mut("EnergySupply")
                     .and_then(Value::as_object_mut)
                 {
+                    for supply in base_energy_supply.values_mut() {
+                        if let Some(supply) = supply.as_object_mut() {
+                            supply.remove("ElectricBattery");
+                        }
+                    }
                     for (key, value) in param_energy_supply {
+                        let mut value = value.clone();
+                        if let Some(supply) = value.as_object_mut() {
+                            supply.retain(|_, v| !v.is_null());
+                        }
                         if let Some(base_supply) = base_energy_supply.get_mut(key) {
-                            update_object(base_supply, value);
+                            update_object(base_supply, &value);
                         } else {
-                            base_energy_supply.insert(key.clone(), value.clone());
+                            base_energy_supply.insert(key.clone(), value);
                         }
                     }
                 }
             }
         }
         "mechanical_ventilation_unit" => {
-            if let Some(param_mech_vent_outer) = params
-                .get("InfiltrationVentilation")
-                .and_then(|iv| iv.get("MechanicalVentilation"))
+            if let Some(units) = params
+                .pointer("/InfiltrationVentilation/MechanicalVentilation")
                 .and_then(Value::as_object)
             {
-                if let Some(base_mech_vent_outer) = base_model
+                let fans = base_model
                     .get_mut("InfiltrationVentilation")
-                    .and_then(|iv| iv.get_mut("MechanicalVentilation"))
                     .and_then(Value::as_object_mut)
-                {
-                    // Get the existing mechanical ventilation system name from the base model
-                    if let Some(existing_system_name) = base_mech_vent_outer.keys().next().cloned()
-                    {
-                        // Extract the ductwork attribute from the existing system (if it exists)
-                        let ductwork_attr = base_mech_vent_outer
-                            .get(&existing_system_name)
-                            .and_then(|sys| sys.get("ductwork"))
-                            .cloned();
-
-                        // Get the new attributes from the parameter file
-                        if let Some(param_system) = param_mech_vent_outer.values().next() {
-                            // Create the merged system with new attributes and preserved ductwork
-                            let mut merged_system = param_system.clone();
-                            if let Some(merged_system_obj) = merged_system.as_object_mut() {
-                                let existing_system_obj = base_mech_vent_outer
-                                    .get(&existing_system_name)
-                                    .and_then(Value::as_object);
-                                let target_vent_type =
-                                    merged_system_obj.get("vent_type").and_then(Value::as_str);
-                                let is_mvhr = target_vent_type == Some("MVHR");
-
-                                let preserve_keys: &[&str] = if is_mvhr {
-                                    &["ductwork", "position_intake", "position_exhaust"]
-                                } else {
-                                    &[
-                                        "position_exhaust",
-                                        "mid_height_air_flow_path",
-                                        "orientation360",
-                                        "pitch",
-                                    ]
-                                };
-
-                                if let Some(existing_system_obj) = existing_system_obj {
-                                    for key in preserve_keys {
-                                        if !merged_system_obj.contains_key(*key) {
-                                            if let Some(value) = existing_system_obj.get(*key) {
-                                                merged_system_obj
-                                                    .insert((*key).to_string(), value.clone());
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if is_mvhr {
-                                    // Add ductwork back if it existed in the original system.
-                                    if !merged_system_obj.contains_key("ductwork") {
-                                        if let Some(ductwork) = ductwork_attr {
-                                            merged_system_obj
-                                                .insert("ductwork".to_string(), ductwork);
-                                        }
-                                    }
-                                    for key in
-                                        ["mid_height_air_flow_path", "orientation360", "pitch"]
-                                    {
-                                        merged_system_obj.remove(key);
-                                    }
-                                } else {
-                                    merged_system_obj.remove("ductwork");
-                                    merged_system_obj.remove("position_intake");
-                                    let has_flat_position =
-                                        ["mid_height_air_flow_path", "orientation360", "pitch"]
-                                            .iter()
-                                            .any(|key| merged_system_obj.contains_key(*key));
-                                    if has_flat_position {
-                                        merged_system_obj.remove("position_exhaust");
-                                    }
-                                }
+                    .ok_or_else(|| anyhow::anyhow!("The model has no InfiltrationVentilation section for the mechanical ventilation scenario"))?
+                    .entry("MechanicalVentilation")
+                    .or_insert_with(|| serde_json::json!({}));
+                let fans = fans
+                    .as_object_mut()
+                    .ok_or_else(|| anyhow::anyhow!("MechanicalVentilation is not an object"))?;
+                match units.iter().next() {
+                    // FHS Part F stops a run whose dwelling has no mechanical vents.
+                    None => anyhow::bail!("This mechanical ventilation scenario removes every fan, and FHS needs at least one mechanical vent in the dwelling. Vulcan no longer ships it (mechanical_ventilation_unit/none). Delete this scenario file or choose another ventilation option."),
+                    Some((unit_name, unit)) => {
+                        // A whole-house unit replaces every fan; a local fan replaces only
+                        // its own kind and otherwise joins the others.
+                        let whole_house = matches!(
+                            unit.get("vent_type").and_then(Value::as_str),
+                            Some("MVHR" | "Centralised continuous MEV")
+                        );
+                        let existing = fan_to_replace(fans, unit, whole_house)?;
+                        let merged = merged_fan(unit, existing.as_ref().and_then(|n| fans.get(n)));
+                        let is_mvhr = unit.get("vent_type").and_then(Value::as_str) == Some("MVHR");
+                        if whole_house {
+                            fans.clear();
+                        }
+                        fans.insert(existing.unwrap_or_else(|| unit_name.clone()), merged);
+                        // FHS Part F: a dwelling with MVHR has no background vents.
+                        if is_mvhr {
+                            if let Some(vents) =
+                                base_model.pointer_mut("/InfiltrationVentilation/Vents")
+                            {
+                                *vents = serde_json::json!({});
                             }
-
-                            // Update the merged_json with the new system attributes while preserving the system name
-                            base_mech_vent_outer.clear();
-                            base_mech_vent_outer.insert(existing_system_name, merged_system);
                         }
                     }
                 }
@@ -804,67 +771,101 @@ pub fn merge_model(base_model: &mut Value, category: &str, params: &Value) -> Re
             // For now, we do nothing for other categories
         }
     }
-    // Either snippet may arrive last. Only repair references when there is one
-    // unambiguous plant; independent cylinder heaters are never replaced.
-    if matches!(category, "heat_source_wet" | "hot_water_source") {
-        let plant = base_model
-            .get("HeatSourceWet")
-            .and_then(Value::as_object)
-            .filter(|plants| plants.len() == 1)
-            .and_then(|plants| plants.keys().next())
-            .cloned();
-        if let Some(plant) = plant {
-            if category == "heat_source_wet" {
-                let air_sink = base_model["HeatSourceWet"][&plant]["sink_type"] == "Air";
-                if let Some(systems) = base_model
-                    .get_mut("SpaceHeatSystem")
-                    .and_then(Value::as_object_mut)
-                {
-                    for system in systems.values_mut() {
-                        // WarmAir may follow an air-to-air replacement, never water plant.
-                        if system.get("type").and_then(Value::as_str) == Some("WarmAir")
-                            && !air_sink
-                        {
-                            continue;
-                        }
-                        if let Some(source) =
-                            system.get_mut("HeatSource").and_then(Value::as_object_mut)
-                        {
-                            source.insert("name".into(), Value::String(plant.clone()));
-                        }
-                    }
+    vulcan_model_transform::add_builtin_energy_supplies(base_model);
+    Ok(())
+}
+
+/// Normalise into [0, 360).
+fn rotate(orientation: &mut Value, add: f64) {
+    if let Some(v) = orientation.as_f64() {
+        *orientation = serde_json::json!((v + add).rem_euclid(360.0));
+    }
+}
+
+fn rotate_all(value: &mut Value, add: f64) {
+    match value {
+        Value::Object(map) => {
+            for (key, child) in map.iter_mut() {
+                if key == "orientation360" {
+                    rotate(child, add);
+                } else {
+                    rotate_all(child, add);
                 }
             }
-            if let Some(cylinders) = base_model
-                .get_mut("HotWaterSource")
-                .and_then(Value::as_object_mut)
-            {
-                for cylinder in cylinders.values_mut() {
-                    match cylinder.get("type").and_then(Value::as_str) {
-                        Some("CombiBoiler" | "HIU" | "HeatBattery") => {
-                            cylinder["HeatSourceWet"] = Value::String(plant.clone());
-                        }
-                        Some("StorageTank" | "SmartHotWaterTank") => {
-                            if let Some(sources) = cylinder
-                                .get_mut("HeatSource")
-                                .and_then(Value::as_object_mut)
-                            {
-                                for source in sources.values_mut() {
-                                    if source.get("type").and_then(Value::as_str)
-                                        == Some("HeatSourceWet")
-                                    {
-                                        source["name"] = Value::String(plant.clone());
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
+        }
+        Value::Array(items) => items.iter_mut().for_each(|item| rotate_all(item, add)),
+        _ => {}
+    }
+}
+
+/// The base fan of the unit's `vent_type`, if there is exactly one. Several local fans of that
+/// kind are ambiguous; a whole-house unit replaces them all anyway.
+fn fan_to_replace(
+    fans: &Map<String, Value>,
+    unit: &Value,
+    whole_house: bool,
+) -> Result<Option<String>> {
+    let vent_type = unit.get("vent_type");
+    let matching: Vec<&String> = fans
+        .iter()
+        .filter(|(_, fan)| vent_type.is_some() && fan.get("vent_type") == vent_type)
+        .map(|(name, _)| name)
+        .collect();
+    match matching.as_slice() {
+        [] => Ok(None),
+        [name] => Ok(Some((*name).clone())),
+        _ if whole_house => Ok(None),
+        _ => {
+            let names = fans.keys().cloned().collect::<Vec<_>>().join(", ");
+            anyhow::bail!(
+                "The mechanical ventilation scenario cannot tell which fan to replace: {} of the model's fans ({names}) match its vent_type. Edit the fans in the model.",
+                matching.len()
+            )
+        }
+    }
+}
+
+/// The scenario unit, keeping the replaced fan's position and ductwork where the unit has none.
+fn merged_fan(unit: &Value, existing: Option<&Value>) -> Value {
+    let mut merged = unit.clone();
+    let Some(merged_obj) = merged.as_object_mut() else {
+        return merged;
+    };
+    let is_mvhr = merged_obj.get("vent_type").and_then(Value::as_str) == Some("MVHR");
+    let preserve_keys: &[&str] = if is_mvhr {
+        &["ductwork", "position_intake", "position_exhaust"]
+    } else {
+        &[
+            "position_exhaust",
+            "mid_height_air_flow_path",
+            "orientation360",
+            "pitch",
+        ]
+    };
+    if let Some(existing) = existing.and_then(Value::as_object) {
+        for key in preserve_keys {
+            if !merged_obj.contains_key(*key) {
+                if let Some(value) = existing.get(*key) {
+                    merged_obj.insert((*key).to_string(), value.clone());
                 }
             }
         }
     }
-    Ok(())
+    if is_mvhr {
+        for key in ["mid_height_air_flow_path", "orientation360", "pitch"] {
+            merged_obj.remove(key);
+        }
+    } else {
+        merged_obj.remove("ductwork");
+        merged_obj.remove("position_intake");
+        if ["mid_height_air_flow_path", "orientation360", "pitch"]
+            .iter()
+            .any(|key| merged_obj.contains_key(*key))
+        {
+            merged_obj.remove("position_exhaust");
+        }
+    }
+    merged
 }
 
 /// Read the CLI flag from a model-wrapper parameter file.
@@ -1120,7 +1121,13 @@ pub fn prepare_effective_scenario(
     }
     let mut candidate = output.model.clone();
     let mut warnings = Vec::new();
-    for (category, snippet) in snippets {
+    // Orientation turns what the other snippets install too, so it applies last, once.
+    let is_orientation = |(category, _): &&(String, Value)| category == "orientation";
+    let ordered = snippets
+        .iter()
+        .filter(|s| !is_orientation(s))
+        .chain(snippets.iter().filter(is_orientation));
+    for (category, snippet) in ordered {
         // No FHS target schema accepts what these merges write, or the wrapper
         // overwrites it, so they would fail obscurely or silently change nothing.
         let unsupported = match category.as_str() {
@@ -1128,7 +1135,9 @@ pub fn prepare_effective_scenario(
             "tariff" => Some("FHS input has no tariff"),
             "internal_gains" => Some("FHS derives internal gains itself"),
             "controls" => Some("FHS sets heating and hot-water controls itself"),
+            "events" => Some("FHS derives occupancy and hot-water events itself"),
             "glazing" => Some("FHS windows take width and height, not a scaled area; edit the windows in the model"),
+            "space_heat_systems" => Some("it replaces the space heating system type, which the target defaults cannot complete; change the system in the model"),
             _ => None,
         };
         if let Some(reason) = unsupported {
@@ -1142,9 +1151,7 @@ pub fn prepare_effective_scenario(
                 | "location"
                 | "airtightness"
                 | "space_heat_emitters"
-                | "space_heat_systems"
                 | "hot_water_source"
-                | "events"
                 | "solar_systems"
                 | "battery_systems"
                 | "mechanical_ventilation_unit"
@@ -1158,7 +1165,81 @@ pub fn prepare_effective_scenario(
         let before = candidate.clone();
         merge_model(&mut candidate, category, snippet)
             .map_err(|e| PipelineError::InvalidRequest(e.to_string()))?;
-        reject_structural_change(&before, &candidate, "")?;
+        if let Some(field) = structural_change(&before, &candidate, "") {
+            return Err(PipelineError::InvalidRequest(format!(
+                "The {category} scenario changes {field}, which a scenario cannot change; change this in the model instead."
+            )));
+        }
+        let replaces: &[(&str, &str, &str)] = match category.as_str() {
+            "solar_systems" => &[("/OnSiteGeneration", "", "on-site generation")],
+            "battery_systems" => &[("/EnergySupply", "/ElectricBattery", "battery storage")],
+            "mechanical_ventilation_unit" => &[
+                (
+                    "/InfiltrationVentilation/MechanicalVentilation",
+                    "",
+                    "mechanical ventilation",
+                ),
+                ("/InfiltrationVentilation/Vents", "", "background vents"),
+            ],
+            _ => &[],
+        };
+        for &(section, child, label) in replaces {
+            let replaced = before
+                .pointer(section)
+                .and_then(Value::as_object)
+                .into_iter()
+                .flatten()
+                .filter(|(name, value)| {
+                    let at = format!("{section}/{}{child}", pointer_segment(name));
+                    value.pointer(child).is_some() && before.pointer(&at) != candidate.pointer(&at)
+                })
+                .map(|(name, _)| format!("'{name}'"))
+                .collect::<Vec<_>>();
+            if !replaced.is_empty() {
+                let version = &output.version_metadata.hem_core_version;
+                warnings.push(vulcan_model_transform::finalization::SchemaOmission {
+                    code: "W_TARGET_INPUT".into(),
+                    path: section.into(),
+                    message: format!(
+                        "HEM {version}: the {category} scenario replaces the model's {label}: {} no longer in the run.",
+                        replaced.join(", ")
+                    ),
+                });
+            }
+        }
+        if category == "mechanical_ventilation_unit" {
+            let fans = |m: &Value| {
+                m.pointer("/InfiltrationVentilation/MechanicalVentilation")
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default()
+            };
+            let (old, new) = (fans(&before), fans(&candidate));
+            let quoted = |names: Vec<&String>| {
+                names
+                    .iter()
+                    .map(|n| format!("'{n}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let added = quoted(new.keys().filter(|k| !old.contains_key(*k)).collect());
+            let kept_names: Vec<&String> =
+                old.keys().filter(|k| new.get(*k) == old.get(*k)).collect();
+            let stay = if kept_names.len() == 1 {
+                "stays"
+            } else {
+                "stay"
+            };
+            let kept = quoted(kept_names);
+            if !added.is_empty() && !kept.is_empty() {
+                let version = &output.version_metadata.hem_core_version;
+                warnings.push(vulcan_model_transform::finalization::SchemaOmission {
+                    code: "W_TARGET_INPUT".into(),
+                    path: "/InfiltrationVentilation/MechanicalVentilation".into(),
+                    message: format!("HEM {version}: the {category} scenario adds {added} alongside the model's {kept}, which {stay} in the run."),
+                });
+            }
+        }
         if category == "simplified_fabric" {
             if let Some(whole) = snippet.pointer("/party_wall/u_value_whole_wall") {
                 if declares_property(schema, "u_value_whole_wall") {
@@ -1185,6 +1266,11 @@ pub fn prepare_effective_scenario(
                 }
             }
         }
+    }
+    let has = |name: &str| snippets.iter().any(|(category, _)| category == name);
+    if has("heat_source_wet") || has("hot_water_source") {
+        link_wet_heat_sources(&output.model, &mut candidate, has("heat_source_wet"))
+            .map_err(PipelineError::InvalidRequest)?;
     }
     let processed = snippets
         .iter()
@@ -1235,6 +1321,112 @@ pub fn prepare_effective_scenario(
         errors,
     };
     Ok(output)
+}
+
+/// Mutable references to every wet heat source a consumer names: (consumer, needs an air sink, name).
+fn wet_links(model: &mut Value) -> Vec<(String, bool, &mut Value)> {
+    let mut links = Vec::new();
+    let Some(root) = model.as_object_mut() else {
+        return links;
+    };
+    for (section, consumers) in root.iter_mut() {
+        let Some(consumers) = consumers.as_object_mut() else {
+            continue;
+        };
+        for (name, consumer) in consumers.iter_mut() {
+            let label = format!("{section} '{name}'");
+            match section.as_str() {
+                "SpaceHeatSystem" => {
+                    let air = consumer.get("type").and_then(Value::as_str) == Some("WarmAir");
+                    if let Some(link) = consumer.pointer_mut("/HeatSource/name") {
+                        links.push((label, air, link));
+                    }
+                }
+                "HotWaterSource" => {
+                    if consumer.get("HeatSourceWet").is_some_and(Value::is_string) {
+                        links.push((label, false, &mut consumer["HeatSourceWet"]));
+                    } else if let Some(sources) = consumer
+                        .get_mut("HeatSource")
+                        .and_then(Value::as_object_mut)
+                    {
+                        for source in sources.values_mut() {
+                            if source.get("type").and_then(Value::as_str) == Some("HeatSourceWet") {
+                                if let Some(link) = source.get_mut("name") {
+                                    links.push((label.clone(), false, link));
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    links
+}
+
+/// After every snippet: a replaced plant takes over what used the plant it replaced, then every
+/// wet link must name a plant that can serve it, and a scenario plant must serve something.
+/// Order-independent, and a hot-water snippet's own coil is never moved to a different plant.
+fn link_wet_heat_sources(
+    base: &Value,
+    model: &mut Value,
+    plant_replaced: bool,
+) -> Result<(), String> {
+    let old_plants: Vec<String> = base
+        .get("HeatSourceWet")
+        .and_then(Value::as_object)
+        .map(|plants| plants.keys().cloned().collect())
+        .unwrap_or_default();
+    let plants = model
+        .get("HeatSourceWet")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mut used = std::collections::HashSet::new();
+    let available = || {
+        if plants.is_empty() {
+            "none".to_string()
+        } else {
+            plants
+                .keys()
+                .map(|k| format!("'{k}'"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+    };
+    for (consumer, needs_air, link) in wet_links(model) {
+        if plant_replaced && plants.len() == 1 {
+            if let Some(old) = link.as_str().filter(|n| old_plants.iter().any(|o| o == n)) {
+                if !plants.contains_key(old) {
+                    *link = Value::String(plants.keys().next().unwrap().clone());
+                }
+            }
+        }
+        let name = link.as_str().unwrap_or_default().to_string();
+        let Some(plant) = plants.get(&name) else {
+            return Err(format!("{consumer} is heated by wet heat source '{name}', which the scenario's model does not have (wet heat sources: {}). Add the matching heat source scenario, or choose one for the model's heat source.", available()));
+        };
+        let air_sink = plant.get("sink_type").and_then(Value::as_str) == Some("Air");
+        if air_sink != needs_air {
+            return Err(if air_sink {
+                format!("Heat source '{name}' is an air-to-air heat pump (sink_type Air); it cannot heat {consumer}, which needs hot water. Use it only with a WarmAir system.")
+            } else {
+                format!("{consumer} is a WarmAir system and needs an air-to-air heat pump; heat source '{name}' heats water.")
+            });
+        }
+        used.insert(name);
+    }
+    if plant_replaced {
+        if let Some(idle) = plants.keys().find(|k| !used.contains(*k)) {
+            return Err(format!("The heat source scenario adds '{idle}', but nothing in the model uses it: no space heating system or hot water source is connected to a wet heat source. Add a wet heating system or a cylinder coil to the model first."));
+        }
+    }
+    Ok(())
+}
+
+fn pointer_segment(key: &str) -> String {
+    key.replace('~', "~0").replace('/', "~1")
 }
 
 /// (zone, element) of each party wall carrying a whole-wall U-value whose
@@ -1308,32 +1500,31 @@ fn set_party_wall_whole_u(model: &mut Value, whole: &Value) {
     }
 }
 
-pub fn reject_structural_change(
-    before: &Value,
-    after: &Value,
-    path: &str,
-) -> Result<(), PipelineError> {
+/// The first discriminator (`type`, `vent_type`, ...) that `after` changes, as a JSON pointer.
+fn structural_change(before: &Value, after: &Value, path: &str) -> Option<String> {
     match (before, after) {
         (Value::Object(left), Value::Object(right)) => {
             for discriminator in ["type", "vent_type", "floor_type", "cross_section_shape"] {
                 if left.contains_key(discriminator)
                     && right.get(discriminator) != left.get(discriminator)
                 {
-                    return Err(PipelineError::InvalidRequest(format!("Scenario changes {path}/{discriminator}; edit the source model or supply a separately qualified complete replacement. Existing target defaults cannot be reused for this structural change.")));
+                    return Some(format!("{path}/{discriminator}"));
                 }
             }
-            for (key, value) in left {
-                if let Some(next) = right.get(key) {
-                    reject_structural_change(value, next, &format!("{path}/{key}"))?;
-                }
-            }
+            left.iter().find_map(|(key, value)| {
+                right
+                    .get(key)
+                    .and_then(|next| structural_change(value, next, &format!("{path}/{key}")))
+            })
         }
         (Value::Array(left), Value::Array(right)) => {
-            for (index, (value, next)) in left.iter().zip(right).enumerate() {
-                reject_structural_change(value, next, &format!("{path}/{index}"))?;
-            }
+            left.iter()
+                .zip(right)
+                .enumerate()
+                .find_map(|(index, (value, next))| {
+                    structural_change(value, next, &format!("{path}/{index}"))
+                })
         }
-        _ => {}
+        _ => None,
     }
-    Ok(())
 }
