@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // This file is subject to Vulcan Origin Terms v1.0; see scripts/hem-targets/licensing/ADDITIONAL_TERMS.md.
 
-//! Thin FHS target boundary. Preparation lives in the shared canonical converter.
+//! Thin FHS target runtime boundary. Hosts convert with their own WASM (`wasm_wrapper`).
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -70,26 +70,6 @@ pub fn setup_panic_hook() {
 }
 
 #[wasm_bindgen]
-pub fn prepare_target_scenario(request_json: &str, snippets_json: &str) -> String {
-    let result = (|| {
-        let request_value: serde_json::Value = serde_json::from_str(request_json)
-            .map_err(|e| format!("Invalid target request: {e}"))?;
-        if request_value.get("conversion_profile").is_none() {
-            return Err("Target preparation requires an explicit conversion_profile".to_string());
-        }
-        let request = serde_json::from_value(request_value)
-            .map_err(|e| format!("Invalid target request: {e}"))?;
-        let snippets: Vec<(String, serde_json::Value)> = serde_json::from_str(snippets_json)
-            .map_err(|e| format!("Invalid scenario snippets: {e}"))?;
-        hem_target_core::prepare_target_scenario(request, &snippets).map_err(|e| e.to_string())
-    })();
-    match result {
-        Ok(output) => serde_json::json!({"ok":true,"output":output}).to_string(),
-        Err(error) => serde_json::json!({"ok":false,"error":error}).to_string(),
-    }
-}
-
-#[wasm_bindgen]
 pub fn run_target_input(
     model_json: &str,
     output_dir: &str,
@@ -111,10 +91,6 @@ pub fn run_target_input(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn preparation_requires_explicit_profile() {
-        assert!(prepare_target_scenario("{}", "[]").contains("explicit conversion_profile"));
-    }
     #[test]
     fn malformed_prepared_input_fails_without_calculation() {
         assert!(run_target_input("[]", "model", r#"["actual"]"#, None).contains("JSON object"));

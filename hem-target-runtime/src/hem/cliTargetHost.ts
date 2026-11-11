@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // This file is subject to Vulcan Origin Terms v1.0; see scripts/hem-targets/licensing/ADDITIONAL_TERMS.md.
 
-import { ecaasOnlyBatchMessage, treatedFloorAreaBatchMessage, loadTargetPreparation, snapshotBatchTarget, prepareTargetBatch, prepareTargetCsvWithManifest, type TargetBatchSnapshot } from './targetPreparation';
+import { appPreparation, ecaasOnlyBatchMessage, preparedByBuild, treatedFloorAreaBatchMessage, snapshotBatchTarget, prepareTargetBatch, prepareTargetCsvWithManifest, type TargetBatchSnapshot } from './targetPreparation';
 import { TargetAssets } from './targetAssets';
 import { resolveHemTarget, validateTargetManifest, type HemTargetManifest } from './targets';
 
@@ -14,17 +14,30 @@ declare global {
   }
 }
 
+/** The package's own WASM, served by the adapter at /app/ after a hash check against its version file. */
+async function packageConverter(remedy: string) {
+  const glue = '/app/wasm_wrapper.js'; // a variable, so the bundler leaves the route to the page
+  // react-doctor-disable-next-line react-doctor/no-dynamic-import-path -- the adapter serves only the verified package WASM at this route.
+  const module = await import(/* @vite-ignore */ glue);
+  await module.default({ module_or_path: '/app/wasm_wrapper_bg.wasm' });
+  const response = await fetch('/app/wasm_version.json');
+  if (!response.ok) throw new Error('The package WASM version file is missing');
+  return { prepare: appPreparation(module), preparedBy: preparedByBuild(await response.json(), remedy) };
+}
+
 /** The CLI supplies verified local bytes; source preparation and calculation use the app modules. */
 export async function run(request: {
   manifest: HemTargetManifest; operation: 'prepare' | 'snapshot' | 'batch'; csv?: string;
   config?: Record<string, unknown>; configName?: string; jobId: string; startedAt: string;
+  /** What the user does when the package WASM has no build provenance; the caller of the adapter knows. */
+  wasmRemedy: string;
 }) {
   const { manifest } = request;
   const target = resolveHemTarget(manifest.bundleId);
   validateTargetManifest(manifest, target);
   if (request.operation === 'prepare') {
     if (typeof request.csv !== 'string') throw new Error('CSV source required');
-    return prepareTargetCsvWithManifest(request.csv, manifest, window.targetCliRead);
+    return prepareTargetCsvWithManifest(request.csv, manifest, (await packageConverter(request.wasmRemedy)).prepare, window.targetCliRead);
   }
   const config = request.config;
   if (request.operation === 'snapshot') {
@@ -38,12 +51,13 @@ export async function run(request: {
   if (ecaasOnly) throw new Error(ecaasOnly);
   const treatedFloorArea = treatedFloorAreaBatchMessage(config, config.__hem as TargetBatchSnapshot);
   if (treatedFloorArea) throw new Error(treatedFloorArea);
-  // Open -> download -> load is intentionally ordered: preparation reads only verified cached bytes.
+  // Open -> download -> prepare is intentionally ordered: preparation reads only verified cached bytes.
   // react-doctor-disable-next-line react-doctor/async-parallel -- download depends on the opened cache; preparation depends on the completed download.
   const assets = await TargetAssets.open();
   await assets.download(manifest, (completed, total) => { void window.targetCliProgress({ status: 'running', stage: 'download', completed, total }); });
-  const jobs = await prepareTargetBatch(config, config.__hem as TargetBatchSnapshot, manifest,
-    request.configName!, request.jobId, request.startedAt, await loadTargetPreparation(manifest));
+  const { prepare, preparedBy } = await packageConverter(request.wasmRemedy);
+  const jobs = (await prepareTargetBatch(config, config.__hem as TargetBatchSnapshot, manifest,
+    request.configName!, request.jobId, request.startedAt, prepare)).map(job => ({ ...job, preparedBy }));
   return new Promise((resolve, reject) => {
     const worker = new Worker(target.runtime === 'python' ? '/python-worker.mjs' : '/rust-worker.mjs', { type: 'module' });
     const finish = (error?: string) => {

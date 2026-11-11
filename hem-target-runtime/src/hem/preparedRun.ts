@@ -5,10 +5,12 @@
 import { sha256 } from './targetAssets';
 import { parseHeatingProfile, type HeatingProfile } from './heatingProfile';
 import type { HemTargetManifest } from './targets';
+import type { WasmVersionInfo } from '@repo/core';
 export interface PreparedWeather { path: string; epw: string; sha256: string; }
 /** `parameterFiles` are the scenario's snippets, relative to batch_parameters; they name the scenario in a failure.
- * `startedAt` is when the run started (ISO 8601), the same for all its jobs; it orders runs whose files a copy re-dated. */
-export interface PreparedHemJob { startedAt?: string; name: string; input: string; modes: string[]; outputDirectory: string; archiveDirectory?: string; sourceCsv?: string; weather?: PreparedWeather; warnings?: string[]; heatingProfile?: HeatingProfile; parameterFiles?: string[]; }
+ * `startedAt` is when the run started (ISO 8601), the same for all its jobs; it orders runs whose files a copy re-dated.
+ * `preparedBy` names the app WASM build whose converter prepared `input`; every host sets it (`preparedByBuild`). */
+export interface PreparedHemJob { startedAt?: string; name: string; input: string; modes: string[]; outputDirectory: string; archiveDirectory?: string; sourceCsv?: string; weather?: PreparedWeather; warnings?: string[]; heatingProfile?: HeatingProfile; parameterFiles?: string[]; preparedBy?: Pick<WasmVersionInfo, 'build_id' | 'source_git_commit' | 'variant' | 'sha256'>; }
 export async function executePreparedJobs(
   manifest: HemTargetManifest, bundleId: string, jobId: string, jobs: PreparedHemJob[],
   execute: (input: string, modes: string[], weather?: PreparedWeather, heatingProfile?: HeatingProfile) => Promise<Record<string, string>>,
@@ -32,7 +34,7 @@ export async function executePreparedJobs(
     // react-doctor-disable-next-line react-doctor/async-defer-await, react-doctor/async-await-in-loop -- the hash is included in this job's marker before any output is written.
     const inputSha256 = await sha256(new TextEncoder().encode(job.input));
     if (job.weather && (!job.weather.epw.trim() || await sha256(new TextEncoder().encode(job.weather.epw)) !== job.weather.sha256)) throw new Error('Prepared weather hash mismatch or empty EPW');
-    const provenance = { ...(job.weather ? { weather: { path: job.weather.path, sha256: job.weather.sha256 } } : {}), ...(job.heatingProfile ? { calculationKind: 'operating-sensitivity', heatingProfile: job.heatingProfile } : {}), target: manifest, inputSha256, modes: job.modes, jobId, ...(job.startedAt ? { startedAt: job.startedAt } : {}), name: job.name, ...(job.warnings?.length ? { warnings: job.warnings } : {}) };
+    const provenance = { ...(job.weather ? { weather: { path: job.weather.path, sha256: job.weather.sha256 } } : {}), ...(job.heatingProfile ? { calculationKind: 'operating-sensitivity', heatingProfile: job.heatingProfile } : {}), target: manifest, inputSha256, ...(job.preparedBy ? { preparedBy: job.preparedBy } : {}), modes: job.modes, jobId, ...(job.startedAt ? { startedAt: job.startedAt } : {}), name: job.name, ...(job.warnings?.length ? { warnings: job.warnings } : {}) };
     try {
       // A crash or termination leaves this non-complete record. The original input is retained.
       await write(`${archive}/target-run.json`, JSON.stringify({ ...provenance, status: 'running' }));

@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { webcrypto } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { HEM_TARGETS, requiresDetailedThermalBridges, targetPreparationContract, targetScenarioModes, assertRustTargetVersions, type HemTarget, modelArtifacts, resolveBatchTarget, resolveHemTarget, validateTargetManifest, type HemTargetManifest } from './targets';
+import { HEM_TARGETS, requiresDetailedThermalBridges, targetPreparationContract, targetScenarioModes, assertRustTargetVersions, type HemTarget, modelArtifacts, resolveBatchTarget, UNPINNED_CSV_TARGET, resolveHemTarget, validateTargetManifest, type HemTargetManifest } from './targets';
 import { RELEASE_MANIFEST_HASHES, TargetAssets, loadTargetManifest, sha256 } from './targetAssets';
 import { executePreparedJobs } from './preparedRun';
 
@@ -36,7 +36,8 @@ describe('immutable target resolution', () => {
   });
   it('never substitutes an absent or mixed saved pin', () => {
     expect(() => resolveHemTarget('old-unavailable')).toThrow('unavailable');
-    expect(() => resolveBatchTarget([undefined])).toThrow('Open and save each base model');
+    expect(resolveHemTarget(UNPINNED_CSV_TARGET).version).toBe('1.0.0a7');
+    expect(() => resolveBatchTarget([])).toThrow('at least one base model');
     expect(() => resolveBatchTarget(HEM_TARGETS.map(target => target.id))).toThrow('cannot mix');
     expect(() => resolveBatchTarget([target.id], HEM_TARGETS[0].id)).toThrow('Saved batch');
   });
@@ -80,11 +81,18 @@ describe('complete runtime identity', () => {
   });
   it('never treats source archives as executable dependencies', () => {
     const invalid = manifest();
-    invalid.preparation.javascript = 'source/prep.js';
-    invalid.artifacts.push({ path: 'source/prep.js', bytes: 1, sha256: 'b'.repeat(64) });
+    invalid.preparation.schema = 'source/schema.json';
+    invalid.artifacts.push({ path: 'source/schema.json', bytes: 1, sha256: 'b'.repeat(64) });
     expect(() => validateTargetManifest(invalid, target)).toThrow('reserved source');
     const invalidIndex = manifest(); invalidIndex.runtime.index = 'source/runtime/';
     expect(() => validateTargetManifest(invalidIndex, target)).toThrow('reserved source');
+  });
+  it('needs no pinned converter, and skips it unless it is also the runtime', () => {
+    const { schema, defaults } = manifest().preparation;
+    const future = { ...manifest(), preparation: { schema, defaults }, artifacts: manifest().artifacts.filter(artifact => !artifact.path.startsWith('prep.')) };
+    expect(() => validateTargetManifest(future, target)).not.toThrow();
+    expect(modelArtifacts(manifest()).map(artifact => artifact.path)).not.toContain('prep.wasm');
+    expect(modelArtifacts({ ...manifest(), runtime: { javascript: 'prep.js', wasm: 'prep.wasm' } }).map(artifact => artifact.path)).toEqual(expect.arrayContaining(['prep.js', 'prep.wasm']));
   });
   it('never treats published notices as executable dependencies', () => {
     const bundle = manifest();
@@ -213,7 +221,7 @@ describe('verified shared artifact cache', () => {
   });
   it('keeps source archives and notices published but outside model download and worker memory', async () => {
     const data = new TextEncoder().encode('runtime');
-    const runtime = { path: 'prep.wasm', bytes: data.length, sha256: await sha256(data) };
+    const runtime = { path: 'hem.whl', bytes: data.length, sha256: await sha256(data) };
     const source = { path: 'source/sources.tar.gz', bytes: 115262341, sha256: 'c'.repeat(64) };
     const records = new Map<string, Response>();
     const cache = { match: async (key: string) => records.get(key)?.clone(), put: async (key: string, response: Response) => { records.set(key, response.clone()); } } as unknown as Cache;
